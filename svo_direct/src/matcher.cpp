@@ -25,7 +25,9 @@
 #include <svo/direct/feature_alignment.h>
 #include <svo/common/camera.h>
 #include <svo/common/logging.h>
-
+#define LOG_IF_(condition, ...) if (condition) { \
+        printf(__VA_ARGS__); \
+    }
 namespace svo {
 
 Matcher::MatchResult Matcher::findMatchDirect(
@@ -146,7 +148,7 @@ Matcher::MatchResult Matcher::findMatchDirectSegmentEndpoint(
     const Frame& cur_frame,
     const Eigen::Ref<Keypoint> px_ref,
     const Eigen::Ref<BearingVector> f_ref,
-    const Eigen::Ref<Eigen::Matrix<FloatType,2,1>> grad_ref, 
+    const Eigen::Ref<GradientVector> grad_ref, 
     const int ref_level,
     const FeatureType & type_ref,
     const FloatType& ref_depth,
@@ -247,32 +249,36 @@ Matcher::MatchResult Matcher::findMatchDirectSegmentEndpoint(
 std::vector< Matcher::MatchResult> Matcher::findMatchDirectSegment(
     const Frame& ref_frame,
     const Frame& cur_frame,
-    const SegmentWrapper& ref_ftr,
+    SegmentWrapper& ref_ftr,  
     const FloatType& ref_depth_s,
-    const FloatType& ref_depth_e,
-    Eigen::Ref<Keypoint> px_cur_s,
+    const FloatType& ref_depth_e,       
+    Eigen::Ref<Keypoint> px_cur_s,  
     Eigen::Ref<Keypoint> px_cur_e,
     Eigen::Ref<BearingVector> s_f_cur,
     Eigen::Ref<BearingVector> e_f_cur
     )
-{
+{ 
 
+  //1. what is the block<2,1>(0,0) return?
+  //2. why the return thing could not be compiler?
+  //3. what is the ref and ref& meaning 
+  // ref_ftr.segment.head<2>(0)=Eigen::Vector2d(1.0, 2.0);
   Matcher::MatchResult res_s= Matcher::findMatchDirectSegmentEndpoint(
      ref_frame,
      cur_frame,
-    ref_ftr.segment.head<2>(),
+    ref_ftr.segment.block<2,1>(0,0),
     ref_ftr.s_f,
     ref_ftr.grad,
     ref_ftr.level,
     ref_ftr.type,
     ref_depth_s,
-     px_cur_s);
+     px_cur_s);     
   s_f_cur=f_cur_;
      
   Matcher::MatchResult res_e= Matcher::findMatchDirectSegmentEndpoint(
      ref_frame,
      cur_frame,
-    ref_ftr.segment.tail<2>(),
+    ref_ftr.segment.block<2,1>(2,0),
     ref_ftr.e_f,
     ref_ftr.grad,
     ref_ftr.level,
@@ -280,7 +286,7 @@ std::vector< Matcher::MatchResult> Matcher::findMatchDirectSegment(
     ref_depth_e,
      px_cur_e);
   e_f_cur=f_cur_;
-
+    
     return {res_s,res_e};
 }
 
@@ -325,6 +331,7 @@ Matcher::MatchResult Matcher::findEpipolarMatchDirectSegmentEndpoint(
      reference_px_endpoint=ref_px_end;
     
   }
+
 
   // Compute start and end of epipolar line in old_kf for match search, on image plane
   
@@ -392,6 +399,29 @@ Matcher::MatchResult Matcher::findEpipolarMatchDirectSegmentEndpoint(
   // Case 2: search along the epipolar line for the best match
   PatchScore patch_score(patch_); // precompute for reference patch
   BearingVector C = T_cur_ref.getRotation().rotate(reference_bearing_endpoint) + T_cur_ref.getPosition()*d_estimate_inv;
+
+
+  // LOG_IF_((reference_bearing_endpoint.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any(),"reference_bearing_endpoint",reference_bearing_endpoint," d_min_inv:",d_min_inv," d_max_inv:",d_max_inv, " d_estimate_inv:",d_estimate_inv);
+  // LOG_IF_((A.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any(),"reference_bearing_endpoint",reference_bearing_endpoint," d_min_inv:",d_min_inv," d_max_inv:",d_max_inv, " d_estimate_inv:",d_estimate_inv);
+  // LOG_IF_((B.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any(),"reference_bearing_endpoint",reference_bearing_endpoint," d_min_inv:",d_min_inv," d_max_inv:",d_max_inv, " d_estimate_inv:",d_estimate_inv);
+  // LOG_IF_((C.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any(),"reference_bearing_endpoint",reference_bearing_endpoint," d_min_inv:",d_min_inv," d_max_inv:",d_max_inv, " d_estimate_inv:",d_estimate_inv);
+  if((reference_bearing_endpoint.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  return  MatchResult::kFailbadvalue;
+  CHECK(false)<<"reference_bearing_endpoint"<<reference_bearing_endpoint<<"d_min_inv"<<d_min_inv<<"d_max_inv"<<d_max_inv<<"d_estimate_inv"<<d_estimate_inv;
+}
+if((B.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  return  MatchResult::kFailbadvalue;
+
+  CHECK(false)<<"reference_bearing_endpoint"<<reference_bearing_endpoint<<"d_min_inv"<<d_min_inv<<"d_max_inv"<<d_max_inv<<"d_estimate_inv"<<d_estimate_inv;
+}
+if((C.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  return  MatchResult::kFailbadvalue;
+
+  CHECK(false)<<"reference_bearing_endpoint"<<reference_bearing_endpoint<<"d_min_inv"<<d_min_inv<<"d_max_inv"<<d_max_inv<<"d_estimate_inv"<<d_estimate_inv;
+}
   scanEpipolarLine(cur_frame, A, B, C, patch_score, search_level_, &px_cur_, &zmssd_best);
 
   // check if the best match is good enough
@@ -426,13 +456,14 @@ std::vector<Matcher::MatchResult> Matcher::findEpipolarMatchDirectSegment(
     const double d_min_inv_e,
     const double d_max_inv_e,
     double& depth_e,
-    Segment& seg_cur,
-    BearingVector& s_f_cur,
-    BearingVector& e_f_cur
+    Eigen::Ref<Segment> seg_cur,
+    Eigen::Ref<BearingVector> s_f_cur,
+    Eigen::Ref<BearingVector> e_f_cur
     )
 {
   Matcher::MatchResult s_matchresult=findEpipolarMatchDirectSegmentEndpoint(ref_frame,cur_frame,ref_ftr,0,d_estimate_inv_s,d_min_inv_s,d_max_inv_s,depth_s);
   s_f_cur=f_cur_;
+  
   seg_cur.head<2>()= px_cur_;
   Matcher::MatchResult e_matchresult=findEpipolarMatchDirectSegmentEndpoint(ref_frame,cur_frame,ref_ftr,2,d_estimate_inv_e,d_min_inv_e,d_max_inv_e,depth_e);
   e_f_cur=f_cur_;
@@ -721,8 +752,21 @@ void Matcher::scanEpipolarUnitSphere(
   size_t n_steps = epi_length_pyramid_ / 0.7; // TODO(zzc): better way of doing this?
   n_steps = n_steps>options_.max_epi_search_steps? options_.max_epi_search_steps:n_steps;
   size_t half_steps = n_steps / 2;
+if((A.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;
+}
 
-  // calculate the step in angle
+if((B.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;
+}
+
+if((C.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;
+}
+  // calculate the step in angle 
   Eigen::Vector3d f_A = A.normalized();
   Eigen::Vector3d f_B = B.normalized();
   double step = std::acos(f_A.dot(f_B))/ n_steps;

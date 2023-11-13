@@ -16,6 +16,10 @@
 #include <vikit/math_utils.h>
 #include <vikit/timer.h>
 #define SEGMENT_ENABLE
+#define NAME_VALUE_LOG(x) std::cout << #x << ": " << (x) << std::endl;
+#define CHECK_EIGEN_HAVE_NAN(x,str) if((x.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any()) std::cout<<str<< #x <<":\n"<< (x).transpose()<<std::endl;
+
+
 namespace svo {
 
 Reprojector::Reprojector(
@@ -310,7 +314,7 @@ void Reprojector::reprojectFrames(//reproject feature and segment rules should b
 }
 
 #ifdef SEGMENT_ENABLE
-void Reprojector::reprojectFrames(// just for segment projection
+void Reprojector::reprojectFramesSegment(// just for segment projection
     const FramePtr& cur_frame,
     const std::vector<FramePtr>& visible_kfs,
     std::vector<LinePtr>& trash_segments)//reproject is likely to link the frame
@@ -338,6 +342,7 @@ void Reprojector::reprojectFrames(// just for segment projection
   candidates_.clear();
   for(auto & ref_frame:visible_kfs)
   {
+    
     for(size_t i =0; i< ref_frame->num_segments_;++i)
     {
       const FeatureType& type = ref_frame->seg_type_vec_[i];//get the feature type in the frame
@@ -374,16 +379,25 @@ void Reprojector::reprojectFrames(// just for segment projection
       Candidate candidate;
       if(reprojector_utils::getCandidateSegment(cur_frame, ref_frame, i, candidate))
         candidates_.push_back(candidate);
+      // NAME_VALUE_LOG(ref_frame->seg_vec_[i]);
+      // NAME_VALUE_LOG(ref_frame->seg_f_vec_[i*2]);
+      // NAME_VALUE_LOG(ref_frame->seg_f_vec_[i*2+1]);
     }
   }
-    
-  
-
+  if (doesFrameHaveEnoughSegments(cur_frame))
+  {
+    // In this case we already have enough features but we just want to set the
+    // occupancy such that the depth filter doesn't extract too many new features.
+    // TODO(cfo): Actually, this should only be done if a new keyframe is selected.
+    // reprojector_utils::setGridCellsOccupiedSegment(candidates_, *grid_);
+    candidates_.clear();
+    return;
+  }
   Statistics lm_stats;
   VLOG(10) << "seg ment Landmark candidates num: " << candidates_.size() << std::endl;
   reprojector_utils::sortCandidatesByReprojStats(candidates_);//compare with score reproject_num and feature type
   reprojector_utils::matchSegmentCandidates(
-        cur_frame, options_.max_n_features_per_frame,// notice
+        cur_frame, options_.max_n_segments_per_frame,// notice
         options_.affine_est_offset, options_.affine_est_gain,
         candidates_, *grid_, lm_stats, options_.seed_sigma2_thresh);
   VLOG(10) << "After projection: remaining segment landmark candidates num: "
@@ -395,7 +409,7 @@ void Reprojector::reprojectFrames(// just for segment projection
 
   // if we have enough landmarks, we still need to set the grid occupancy
   // to avoid extracting too many new landmarks from the rest candidates
-  if (doesFrameHaveEnoughSegment(cur_frame))
+  if (doesFrameHaveEnoughSegments(cur_frame))
   {
     reprojector_utils::setGridCellsOccupiedSegment(candidates_, *grid_);
     // We don't return here because we want to
@@ -418,7 +432,7 @@ void Reprojector::reprojectFrames(// just for segment projection
       }
     }
   }
-  if (doesFrameHaveEnoughSegment(cur_frame))
+  if (doesFrameHaveEnoughSegments(cur_frame))
   {
     // In this case we already have enough features but we just want to set the
     // occupancy such that the depth filter doesn't extract too many new features.
@@ -432,7 +446,7 @@ void Reprojector::reprojectFrames(// just for segment projection
            << std::endl;
   reprojector_utils::sortCandidatesByReprojStats(candidates_);
   reprojector_utils::matchSegmentCandidates(
-        cur_frame, options_.max_n_features_per_frame,
+        cur_frame, options_.max_n_segments_per_frame,
         options_.affine_est_offset, options_.affine_est_gain,
         candidates_, *grid_, sd_stats, options_.seed_sigma2_thresh);
   VLOG(10) << "After projection:"
@@ -443,7 +457,7 @@ void Reprojector::reprojectFrames(// just for segment projection
           << ", matches = " << sd_stats.n_matches;
   stats_.add(sd_stats);
 
-  if (doesFrameHaveEnoughSegment(cur_frame) ||
+  if (doesFrameHaveEnoughSegments(cur_frame) ||
       !options_.reproject_unconverged_seeds)
   {
     reprojector_utils::setGridCellsOccupiedSegment(candidates_, *grid_);
@@ -469,7 +483,7 @@ void Reprojector::reprojectFrames(// just for segment projection
   Statistics un_sd_stats;
   VLOG(10) << "Unconverged seeds candidates num " << candidates_.size()
            << std::endl;
-  size_t max_allowed_total = options_.max_n_features_per_frame,;
+  size_t max_allowed_total = options_.max_n_segments_per_frame;
   if (options_.max_unconverged_seeds_ratio > 0)
   {
     const double min_lm_seeds_ratio = 1 - options_.max_unconverged_seeds_ratio;
@@ -500,7 +514,7 @@ void Reprojector::reprojectFrames(// just for segment projection
           << ", success = " << un_sd_stats.n_matches;
   stats_.add(un_sd_stats);
 
-  if (doesFrameHaveEnoughSegment(cur_frame))
+  if (doesFrameHaveEnoughSegments(cur_frame))
   {
     reprojector_utils::setGridCellsOccupiedSegment(candidates_, *grid_);
   }
@@ -588,6 +602,8 @@ void matchCandidates(
   candidates.erase(candidates.begin(), candidates.begin()+i);
 }
 
+
+#ifdef SEGMENT_ENABLE
 void matchSegmentCandidates(
     const FramePtr &frame,
     const size_t max_n_segments_per_frame,
@@ -613,9 +629,13 @@ void matchSegmentCandidates(
     {
       continue;
     }
-
+      if (frame->num_segments_>=static_cast<svo::size_t>(frame->seg_vec_.cols()))
+  {
+    break;
+  }
     ++stats.n_trials;
-    SegmentWrapper segment_wrapper = frame->getEmptySegmentWrapper();
+    SegmentWrapper segment_wrapper = frame->getEmptySegmentWrapper();//change the current frame s_f_vec_ e_f_vec_ 
+    
     if(matchSegmentCandidate(frame, candidate, matcher, segment_wrapper,
                       seed_sigma2_thresh))
     {
@@ -628,12 +648,35 @@ void matchSegmentCandidates(
       {
         break;
       }
+      if(segment_wrapper.line_landmark!=nullptr)CHECK(static_cast<int>(segment_wrapper.type)>8);
+      // segment_wrapper.e_f=candidate.ref_frame->seg_f_vec_.col(candidate.ref_index*2+1);
+      // NAME_VALUE_LOG(candidate.ref_frame->seg_f_vec_.col(candidate.ref_index*2));
+      // NAME_VALUE_LOG(candidate.ref_frame->seg_f_vec_.col(candidate.ref_index*2+1));
+      // NAME_VALUE_LOG(segment_wrapper.e_f);
+      // NAME_VALUE_LOG(segment_wrapper.s_f);
+      // NAME_VALUE_LOG(frame->seg_f_vec_.col((frame->num_segments_-1)*2));
+      // NAME_VALUE_LOG(frame->seg_f_vec_.col((frame->num_segments_-1)*2+1));
     }
+
   }
   candidates.erase(candidates.begin(), candidates.begin()+i);
 }
 
+  std::ostream& operator<<(std::ostream& os, const SegmentWrapper& wrapper)
+{
+    os << "Type: " << static_cast<int>(wrapper.type) << "\n";
+    os << "Segment: " << wrapper.segment.transpose() << "\n"; // Assuming Segment is a matrix or vector
+    os << "Start BearingVector: " << wrapper.s_f.transpose() << "\n"; // Assuming BearingVector is a matrix or vector
+    os << "End BearingVector: " << wrapper.e_f.transpose() << "\n"; // Assuming BearingVector is a matrix or vector
+    os << "Gradient Vector: " << wrapper.grad.transpose() << "\n"; // Assuming GradientVector is a matrix or vector
+    os << "Score: " << wrapper.score << "\n";
+    os << "Level: " << wrapper.level << "\n";
+    // os << "Line Landmark: " << wrapper.line_landmark->spos_ <<" "<<wrapper.line_landmark->epos_ <<"\n"; // Assuming LinePtr is a pointer to some type that has an operator<<
+    os << "Seed Reference: " << wrapper.seed_ref.seed_id << "\n";
+    os << "Track ID: " << wrapper.track_id << "\n";
 
+    return os;
+}
 bool matchSegmentCandidate(
     const FramePtr& frame,
     Reprojector::Candidate& c,
@@ -648,27 +691,43 @@ bool matchSegmentCandidate(
   CHECK_LT(c.ref_index, c.ref_frame->num_segments_);
   int track_id = -1;
   BearingVector s_f_cur,e_f_cur;
-
+  if(c.ref_frame->seg_landmark_vec_[c.ref_index]!=nullptr)
+    CHECK(static_cast<int>(c.ref_frame->seg_type_vec_[c.ref_index])>8);
   if(c.ref_frame->seg_landmark_vec_.at(c.ref_index) == nullptr)
   {
     SegmentWrapper ref_ftr = c.ref_frame->getSegmentWrapper(c.ref_index);
+    
     if(isConvergedSegmentSeed(c.type) )
     {
       const Eigen::Matrix<FloatType ,2,1> ref_depth = c.ref_frame->getSegmentSeedDepth(c.ref_index);
+      // NAME_VALUE_LOG(isConvergedSegmentSeed(c.type) );
+      // NAME_VALUE_LOG(c.ref_frame->getSegmentSeedDepth(c.ref_index));//test the inv_depth
+      // NAME_VALUE_LOG(c.ref_frame->seg_f_vec_(c.ref_index*2));//test the inv_depth
+      // NAME_VALUE_LOG(c.ref_frame->seg_f_vec_(c.ref_index*2+1));//test the inv_depth
+      CHECK_EIGEN_HAVE_NAN(ref_depth,"whrn matchcandidata")
+      CHECK_EIGEN_HAVE_NAN(ref_depth,"whrn matchcandidata")
+
+
       std::vector<Matcher::MatchResult>  res =
           matcher.findMatchDirectSegment(*c.ref_frame, *frame, ref_ftr, ref_depth(0),ref_depth(1),
-                                  c.cur_px,c.cur_px_end);
-      if(res != Matcher::MatchResult::kSuccess)
+                                  c.cur_px,c.cur_px_end,s_f_cur,e_f_cur);
+      
+      if(res[0] != Matcher::MatchResult::kSuccess|| res[1]!=Matcher::MatchResult::kSuccess)
         return false;
+
     }
     else if(isUnconvergedSegmentSeed(c.type) )
     {
+      Segment seg_;
       if(!depth_filter_utils::updateSegmentSeed(
-           *frame, *c.ref_frame, c.ref_index, matcher, seed_sigma2_thresh,
+           *frame, *c.ref_frame, c.ref_index, matcher, seed_sigma2_thresh,s_f_cur,e_f_cur,seg_,
            false, false))
       {
         return false;
       }
+        c.cur_px=seg_.head<2>();
+        c.cur_px_end=seg_.tail<2>();
+        // NAME_VALUE_LOG(static_cast<int>(c.type));
     }
     else
     {
@@ -679,8 +738,10 @@ bool matchSegmentCandidate(
     track_id = ref_ftr.track_id;// just relate a point3d or line3d
     segment.seed_ref.keyframe = c.ref_frame;// change the segment would change the seedref vector in frame
     segment.seed_ref.seed_id = c.ref_index;
+    // segment.s_f=s_f_cur;
+    // segment.e_f=e_f_cur;
   }
-  else
+  else// is the seg_landmar
   {
     const LinePtr& line3d = c.ref_frame->seg_landmark_vec_[c.ref_index];//the landmark and seed is different
     FramePtr ref_frame;
@@ -690,12 +751,15 @@ bool matchSegmentCandidate(
       return false;
     }
     SegmentWrapper ref_ftr = ref_frame->getSegmentWrapper(ref_segment_index);
+    CHECK(static_cast<int>(ref_ftr.type)>8);
     CHECK_NOTNULL(ref_ftr.line_landmark.get()); // debug
     const FloatType ref_depth_s = (ref_frame->pos() - ref_ftr.line_landmark->spos_).norm();
     const FloatType ref_depth_e = (ref_frame->pos() - ref_ftr.line_landmark->epos_).norm();
+    CHECK(!std::isnan(ref_depth_e)&&!std::isnan(ref_depth_e));
     std::vector<Matcher::MatchResult>  res =
-          matcher.findMatchDirectSegment(*c.ref_frame, *frame, ref_ftr, ref_depth_s,ref_depth_e,
-                                  c.cur_px,c.cur_px_end);
+          matcher.findMatchDirectSegment(*ref_frame, *frame, ref_ftr, ref_depth_s,ref_depth_e,
+                                  c.cur_px,c.cur_px_end,s_f_cur,e_f_cur);
+
     if(res[0] != Matcher::MatchResult::kSuccess||res[1] != Matcher::MatchResult::kSuccess)
     {
       line3d->n_failed_reproj_++;
@@ -704,11 +768,12 @@ bool matchSegmentCandidate(
     line3d->n_succeeded_reproj_ += 1;
     grad_ref = ref_ftr.grad;
     segment.line_landmark = line3d;
+    CHECK(static_cast<int>(segment.type)>8);
     track_id = line3d->id();
   }
 
   // Set edgelet direction, check if is consistent.
-  if(isEdgelet(c.type))
+  if(isEdgelet(c.type)||isSegment(c.type))
   {
     GradientVector g_predicted = (matcher.A_cur_ref_ * grad_ref).normalized();
     segment.grad = g_predicted;
@@ -723,26 +788,41 @@ bool matchSegmentCandidate(
       return false;
     */
   }
-
+  // NAME_VALUE_LOG(s_f_cur);
+  // NAME_VALUE_LOG(e_f_cur);
   // Here we add a reference in the segment and frame to the 3D point, the other way
   // round is only done if this frame is selected as keyframe.
   segment.type = c.type;
   segment.segment.head<2>() = c.cur_px;
   segment.segment.tail<2>() = c.cur_px_end;
-  segment.s_f = s_f_cur_;
-  segment.e_f = e_f_cur_;
+  segment.s_f = s_f_cur;
+  segment.e_f = e_f_cur;
   segment.level = matcher.search_level_;
   segment.track_id = track_id;
   segment.score = c.score;
   // TODO: ideally the following should be done via FeatureWrapper
   // This assumes that the feature points to the first free slot
   // i.e., the wrapper is got from getEmptyFeatureWrapper function
-  frame->seg_invmu_sigma2_a_b_vec_.col(frame->numSegments()) =
-      c.ref_frame->seg_invmu_sigma2_a_b_vec_.col(c.ref_index);
+  frame->seg_invmu_sigma2_a_b_vec_.col(frame->numSegments()*2) =
+      c.ref_frame->seg_invmu_sigma2_a_b_vec_.col(c.ref_index*2);
+    frame->seg_invmu_sigma2_a_b_vec_.col(frame->numSegments()*2+1) =
+      c.ref_frame->seg_invmu_sigma2_a_b_vec_.col(c.ref_index*2+1);
+  // NAME_VALUE_LOG(c.ref_index);
+  // NAME_VALUE_LOG(c.ref_frame);
+  // NAME_VALUE_LOG(static_cast<int>(c.type));
+    // if(isSeed(segment.type)){
+    // CHECK(!(frame->seg_invmu_sigma2_a_b_vec_.col(frame->numSegments()*2).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())<<static_cast<int>(segment.type);
+    // CHECK(!(frame->seg_invmu_sigma2_a_b_vec_.col(frame->numSegments()*2+1).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())<<static_cast<int>(segment.type);
+    // }
+  // CHECK_EIGEN_HAVE_NAN(c.ref_frame->seg_invmu_sigma2_a_b_vec_,"after project");
+  
+  // CHECK_EIGEN_HAVE_NAN(c.ref_frame->seg_invmu_sigma2_a_b_vec_,"after project");
   frame->seg_in_ba_graph_vec_[frame->numSegments()] =
       c.ref_frame->seg_in_ba_graph_vec_[c.ref_index];
   return true;
 }
+
+#endif
 
 bool matchCandidate(
     const FramePtr& frame,
@@ -886,47 +966,6 @@ bool getCandidate(
 }
 
 
-bool getCandidateSegment(
-    const FramePtr& cur_frame,
-    const FramePtr& ref_frame,
-    const size_t& seg_ref_index,
-    Reprojector::Candidate& candidate,
-    )
-{
-  Position xyz_world_s = Position::Zero();
-  Position xyz_world_e = Position::Zero();
-  Eigen::Matrix<FloatType, 3, 2> xyz_world_seg;
-  int n_reproj = 0;
-  if(ref_frame->seg_landmark_vec_[seg_ref_index] != nullptr)
-  {
-    const LinePtr& line3d = ref_frame->seg_landmark_vec_[seg_ref_index];
-    xyz_world_s = line3d->spos_;
-    xyz_world_e = line3d->epos_;
-    n_reproj =
-        line3d->n_succeeded_reproj_ - line3d->n_failed_reproj_;
-  }
-  else
-  {
-    xyz_world_seg = 
-        ref_frame->getSegmentSeedPosInFrame(ref_index);
-    xyz_world_s = ref_frame->T_world_cam() *xyz_world_seg.col(0);
-    xyz_world_e = ref_frame->T_world_cam() *xyz_world_seg.col(1);
-  }
-
-  Keypoint px_s;
-  Keypoint px_e;
-  if(!projectPointAndCheckVisibility(cur_frame, xyz_world_s, &px_s)|| !projectPointAndCheckVisibility(cur_frame, xyz_world_e, &px_e))
-  {
-    return false;
-  }
-
-  candidate = Reprojector::Candidate(
-        ref_frame, seg_ref_index, px_s, px_e,n_reproj, ref_frame->seg_score_vec_[seg_ref_index],
-        ref_frame->seg_type_vec_[seg_ref_index],
-        ref_frame->seg_landmark_vec_[seg_ref_index]?
-          ref_frame->seg_landmark_vec_[seg_ref_index]->obs_.size() : 0u);
-  return true;
-}
 
 bool projectPointAndCheckVisibility(
     const FramePtr& frame,
@@ -959,13 +998,14 @@ void setGridCellsOccupied(
     grid.setOccupied(grid_index);
     if( isSegment(candidate.type))
     {
-            grid_index =grid.setOccupied(candidate.cur_px_end.x(), candidate.cur_px_end.y(), 1);
+            grid_index =grid.getCellIndex(candidate.cur_px_end.x(), candidate.cur_px_end.y(), 1);
     grid.setOccupied(grid_index);
     }
 
   }
 }
 
+#ifdef SEGMENT_ENABLE
 void setGridCellsOccupiedSegment(
     const Reprojector::Candidates& candidates,
     OccupandyGrid2D& grid)
@@ -975,10 +1015,72 @@ void setGridCellsOccupiedSegment(
     size_t grid_index =
         grid.getCellIndex(candidate.cur_px.x(), candidate.cur_px.y(), 1);
     grid.setOccupied(grid_index);
-      grid_index =grid.setOccupied(candidate.cur_px_end.x(), candidate.cur_px_end.y(), 1);
+      grid_index =grid.getCellIndex(candidate.cur_px_end.x(), candidate.cur_px_end.y(), 1);
     grid.setOccupied(grid_index);
   }
 }
+
+bool getCandidateSegment(
+    const FramePtr& cur_frame,
+    const FramePtr& ref_frame,
+    const size_t& seg_ref_index,
+    Reprojector::Candidate& candidate
+    )
+{
+  Position xyz_world_s = Position::Zero();
+  Position xyz_world_e = Position::Zero();
+  Eigen::Matrix<FloatType, 3, 2> xyz_world_seg;
+  int n_reproj = 0;
+  if(ref_frame->seg_landmark_vec_[seg_ref_index] != nullptr)
+  {
+    const LinePtr& line3d = ref_frame->seg_landmark_vec_[seg_ref_index];
+    xyz_world_s = line3d->spos_;
+    xyz_world_e = line3d->epos_;
+    n_reproj =
+        line3d->n_succeeded_reproj_ - line3d->n_failed_reproj_;
+  }
+  else 
+  {
+    xyz_world_seg = 
+        ref_frame->getSegmentSeedPosInFrame(seg_ref_index);
+    xyz_world_s = ref_frame->T_world_cam() *xyz_world_seg.col(0);
+    xyz_world_e = ref_frame->T_world_cam() *xyz_world_seg.col(1);
+  //   std::cout<<"getCandidateSegment\n";
+  //     NAME_VALUE_LOG(ref_frame->T_world_cam() *xyz_world_seg.col(0));
+  // NAME_VALUE_LOG(ref_frame->T_world_cam() *xyz_world_seg.col(1));
+  // CHECK_EIGEN_HAVE_NAN(xyz_world_seg,"getCandidateSegment");
+// if((xyz_world_seg.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+// {
+//   // std::cout<<"frame id"<<ref_frame->bundle_id_<<std::endl;
+//   for(size_t a=0;a<ref_frame->num_segments_;a++)
+//   {
+//     std::cout<<ref_frame->seg_invmu_sigma2_a_b_vec_.col(a*2).transpose()<<"\n type "<< static_cast<int>(ref_frame->seg_type_vec_[a])<<"\nf_vec"
+//     <<"\n landmark"<<ref_frame->seg_landmark_vec_[a]<<"\n"<<std::endl;    
+//     // std::cout<<ref_frame->seg_invmu_sigma2_a_b_vec_.col(a*2).transpose()<<'\n'<<ref_frame->seg_invmu_sigma2_a_b_vec_.col(a*2+1).transpose()
+//     // <<"\n type "<< static_cast<int>(ref_frame->seg_type_vec_[a])<<"\nf_vec"<<ref_frame->seg_f_vec_.col(a*2).transpose()<<'\n'<<ref_frame->seg_f_vec_.col(a*2+1).transpose()
+//     // <<"\n landmark"<<ref_frame->landmark_vec_[a]<<"\n"<<std::endl;
+//   }
+//   CHECK(false)<<"candidate's data"<<ref_frame->seg_invmu_sigma2_a_b_vec_.col(seg_ref_index*2)<<
+//   "\n"<<seg_ref_index<<"\nref_type"<<static_cast<int>(ref_frame->seg_type_vec_[seg_ref_index])<<"\n landmark"<<ref_frame->seg_landmark_vec_[seg_ref_index]<<"\n"<<std::endl;    
+//   return false;
+// }
+  }
+  Keypoint px_s;
+  Keypoint px_e;
+  if(!projectPointAndCheckVisibility(cur_frame, xyz_world_s, &px_s)|| !projectPointAndCheckVisibility(cur_frame, xyz_world_e, &px_e))
+  {
+    return false;
+  }
+
+  candidate = Reprojector::Candidate(
+        ref_frame, seg_ref_index, px_s, px_e,n_reproj, ref_frame->seg_score_vec_[seg_ref_index],
+        ref_frame->seg_type_vec_[seg_ref_index],
+        ref_frame->seg_landmark_vec_[seg_ref_index]?
+          ref_frame->seg_landmark_vec_[seg_ref_index]->obs_.size() : 0u);
+  return true;
+}
+
+#endif
 
 void reprojectMapPoints(const FramePtr& frame,
                         const std::vector<FramePtr>& overlap_kfs,

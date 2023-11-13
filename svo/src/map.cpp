@@ -155,7 +155,7 @@ void Map::getOverlapKeyframes
 void Map::getClosestNKeyframesWithOverlap(
     const FramePtr& cur_frame,
     const size_t num_frames,
-    std::vector<FramePtr>* close_kfs) const
+    std::vector<FramePtr>* close_kfs) const//get the nearest keyframe
 {
   CHECK_NOTNULL(close_kfs);
   std::vector<std::pair<FramePtr, double>> overlap_kfs;

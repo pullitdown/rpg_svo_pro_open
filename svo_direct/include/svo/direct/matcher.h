@@ -69,7 +69,8 @@ namespace svo
             kFailAngle,
             kFailCloseView,
             kFailLock,
-            kFailTooFar
+            kFailTooFar,
+            kFailbadvalue
         };
 
         uint8_t patch_[kPatchSize * kPatchSize] __attribute__((aligned(16)));
@@ -98,7 +99,7 @@ namespace svo
 std::vector< MatchResult> findMatchDirectSegment(
     const Frame& ref_frame,
     const Frame& cur_frame,
-    const SegmentWrapper& ref_ftr,
+    SegmentWrapper& ref_ftr,
     const FloatType& ref_depth_s,
     const FloatType& ref_depth_e,
     Eigen::Ref<Keypoint> px_cur_s,
@@ -111,7 +112,7 @@ MatchResult findMatchDirectSegmentEndpoint(
     const Frame& cur_frame,
     const Eigen::Ref<Keypoint> px_ref,
     const Eigen::Ref<BearingVector> f_ref,
-    const Eigen::Ref<Eigen::Matrix<FloatType,2,1>> grad_ref, 
+    const Eigen::Ref<GradientVector> grad_ref, 
     const int ref_level,
     const FeatureType & type_ref,
     const FloatType& ref_depth,
@@ -126,21 +127,22 @@ MatchResult findMatchDirectSegmentEndpoint(
             const double d_min_inv,
             const double d_max_inv,
             double &depth);
-        std::vector<MatchResult> findEpipolarMatchDirectSegment(
-            const Frame &ref_frame,
-            const Frame &cur_frame,
-            const SegmentWrapper &ref_ftr,
-            const double d_estimate_inv_s,
-            const double d_min_inv_s,
-            const double d_max_inv_s,
-            double &depth_s,
-            const double d_estimate_inv_e,
-            const double d_min_inv_e,
-            const double d_max_inv_e,
-            double &depth_e,
-            Segment &seg_cur,
-            BearingVector &s_f_cur,
-            BearingVector &e_f_cur);
+std::vector<MatchResult> findEpipolarMatchDirectSegment(
+    const Frame& ref_frame,
+    const Frame& cur_frame,
+    const SegmentWrapper & ref_ftr,
+    const double d_estimate_inv_s,
+    const double d_min_inv_s,
+    const double d_max_inv_s,
+    double& depth_s,
+    const double d_estimate_inv_e,
+    const double d_min_inv_e,
+    const double d_max_inv_e,
+    double& depth_e,
+    Eigen::Ref<Segment> seg_cur,
+    Eigen::Ref<BearingVector> s_f_cur,
+    Eigen::Ref<BearingVector> e_f_cur
+    );
 
         MatchResult findEpipolarMatchDirectSegmentEndpoint(
             const Frame &ref_frame,

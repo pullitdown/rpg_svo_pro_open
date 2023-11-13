@@ -12,6 +12,8 @@
 #include <svo/tracker/feature_tracker.h>
 
 #define SEGMENT_ENABLE
+#define NAME_VALUE_LOG(x) std::cout << #x << ": \n" << (x) << std::endl;
+
 namespace svo
 {
 
@@ -67,8 +69,7 @@ namespace svo
 
 #ifdef SEGMENT_ENABLE
     // dgz todo
-    if (segment_detector_ != nullptr)
-    {
+
       Segments new_seg;
       Scores new_seg_score;
       FeatureTypes new_seg_types;
@@ -87,6 +88,10 @@ namespace svo
       // frame0->check_segment_infolist_vaild();
       frame0->seg_vec_.middleCols(n_seg_old, n_seg_new) = new_seg;
       frame0->seg_f_vec_.middleCols(n_seg_old * 2, n_seg_new * 2) = new_seg_f; // note add 2 time segment num
+      
+      // NAME_VALUE_LOG(frame0->seg_f_vec_.middleCols(n_seg_old * 2, n_seg_new * 2));//pass
+      // NAME_VALUE_LOG(new_seg_f.cols());
+      // NAME_VALUE_LOG(new_seg.cols());
       if (new_seg.cols() == 0)
       {
         SVO_ERROR_STREAM("Stereo Triangulation: No segment detected.");
@@ -97,7 +102,19 @@ namespace svo
       frame0->num_segments_ += static_cast<size_t>(n_seg_new);
       frame0->seg_type_vec_.insert(
           frame0->seg_type_vec_.begin() + n_seg_old, new_seg_types.cbegin(), new_seg_types.cend());
-    }
+
+
+      std::vector<size_t> seg_indices(static_cast<size_t>(n_seg_new));
+      std::iota(seg_indices.begin(), seg_indices.end(), n_seg_old);
+      long n_segments = std::count_if(
+          new_seg_types.begin(), new_seg_types.end(),
+          [](const FeatureType &t)
+          { return t == FeatureType::kSegment; });
+
+      // shuffle twice before we prefer corners!
+      std::random_shuffle(seg_indices.begin(), seg_indices.begin() + n_segments);
+      // std::random_shuffle(seg_indices.begin() + n_segments, seg_indices.end());
+    
 #endif
 
     // Add features to first frame.
@@ -204,16 +221,21 @@ namespace svo
     FloatType depth_s = 0.0;
     FloatType depth_e = 0.0;
     Segment segment_cur;
-    BearingVector s_f_cur;
-    BearingVector e_f_cur;
+
     // SegmentWrapper ref_ftr_s;
     std::vector<Matcher::MatchResult> res_s;
-    for (size_t i_ref = 0; i_ref < frame0->num_segments_; ++i_ref)
+    for (const size_t &i_ref :seg_indices)
     {
       // matcher.options_.align_1d = isEdgelet(frame0->type_vec_[i_ref]); // TODO(cfo): check effect
       depth_s = 0.0;
       depth_e = 0.0;
       SegmentWrapper ref_ftr_s = frame0->getSegmentWrapper(i_ref);
+      // NAME_VALUE_LOG(ref_ftr_s.s_f);
+      // NAME_VALUE_LOG(ref_ftr_s.segment);
+      // NAME_VALUE_LOG(ref_ftr_s.e_f);
+
+      BearingVector s_f_cur;
+      BearingVector e_f_cur;
       res_s =
           matcher.findEpipolarMatchDirectSegment(
               *frame0, *frame1, ref_ftr_s, options_.mean_depth_inv,
@@ -223,6 +245,11 @@ namespace svo
 
       if (res_s[0] == Matcher::MatchResult::kSuccess && res_s[1] == Matcher::MatchResult::kSuccess)
       {
+
+//           std::cout<<"after stereo find epipolarmatch : and now frame1's idx"<< frame1->num_segments_<<std::endl;
+//   std::cout<<"s_f_cur"<<s_f_cur<<"\ne_f_cur"<<e_f_cur<<"\nseg_cur.tail<2>()"<<segment_cur.tail<2>()<<"\nseg_cur.head<2>()"<<segment_cur.head<2>()<<std::endl;
+//   // std::cout<<<<std::endl;
+//  std::cout<<"s_matchresult"<<(res_s[0]== Matcher::MatchResult::kSuccess)<<"e_matchresult"<<(res_s[1]== Matcher::MatchResult::kSuccess)<<std::endl;
         const Position xyz_world_s = frame0->T_world_cam() * (frame0->seg_f_vec_.col(static_cast<int>(i_ref * 2)) * depth_s);
         const Position xyz_world_e = frame0->T_world_cam() * (frame0->seg_f_vec_.col(static_cast<int>(i_ref * 2 + 1)) * depth_e);
 
@@ -230,12 +257,12 @@ namespace svo
         LinePtr new_seg = std::make_shared<Line>(xyz_world_s, xyz_world_e);
 
         frame0->seg_landmark_vec_[i_ref] = new_seg;
-        CHECK(new_seg->id()>-1)<<"seg_track_id_vec_ is not set";
+        // CHECK(new_seg->id()>-1)<<"seg_track_id_vec_ is not set";
         frame0->seg_track_id_vec_(static_cast<int>(i_ref)) = new_seg->id(); // track id is
         new_seg->addObservation(frame0, i_ref);
 
-        const int i_cur = static_cast<int>(frame1->num_segments_);
-        frame1->seg_type_vec_[static_cast<size_t>(i_cur)] = ref_ftr_s.type;
+        const size_t i_cur = frame1->num_segments_;
+        frame1->seg_type_vec_[i_cur] = ref_ftr_s.type;
         frame1->seg_level_vec_[i_cur] = ref_ftr_s.level;
         frame1->seg_vec_.col(i_cur) = segment_cur;
         frame1->seg_f_vec_.col(i_cur * 2) = s_f_cur;
@@ -243,11 +270,14 @@ namespace svo
         frame1->seg_score_vec_[i_cur] = ref_ftr_s.score;
         GradientVector g = matcher.A_cur_ref_ * ref_ftr_s.grad;
         frame1->seg_grad_vec_.col(i_cur) = g.normalized();
-        frame1->seg_landmark_vec_[static_cast<size_t>(i_cur)] = new_seg;
+
+        frame1->seg_landmark_vec_[i_cur] = new_seg;
         frame1->seg_track_id_vec_(i_cur) = new_seg->id();
-        new_seg->addObservation(frame1, static_cast<size_t>(i_cur));
+        new_seg->addObservation(frame1, i_cur);
         frame1->num_segments_++;
         ++n_segment_succeded;
+        CHECK(static_cast<int>(frame1->seg_type_vec_[i_cur])>8);
+        CHECK(static_cast<int>(frame0->seg_type_vec_[i_ref])>8);
       }
       else
       {
@@ -256,6 +286,15 @@ namespace svo
       if (n_segment_succeded >= n_desired_segment)
         break;
     }
+    // std::cout<<"after stereo triangulation two frame data status : frame 1 detect  feauture , segment :"<< frame1->num_features_<<","<<frame1->num_segments_<<
+    // "frame 0 detect feature, segment"<< frame0->num_features_<< ","<< frame0->num_segments_<<std::endl;
+    
+    // std::cout<<"after stereo triangulation two frame data status :"<<std::endl;
+    // NAME_VALUE_LOG(frame1->num_segments_)
+    // NAME_VALUE_LOG(frame1->seg_f_vec_);
+    // NAME_VALUE_LOG(frame0->num_segments_)
+
+    // NAME_VALUE_LOG(frame0->seg_f_vec_);
     VLOG(20) << "Stereo: Triangulated " << n_segment_succeded << " features,"
              << n_segment_failed << " failed.";
 #endif

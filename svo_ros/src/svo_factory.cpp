@@ -107,7 +107,7 @@ DepthFilterOptions loadDepthFilterOptions(const ros::NodeHandle& pnh)
   DepthFilterOptions o;
   o.max_search_level = vk::param<int>(pnh, "n_pyr_levels", 3) - 1;
   o.use_threaded_depthfilter =
-      vk::param<bool>(pnh, "use_threaded_depthfilter", true);
+      vk::param<bool>(pnh, "use_threaded_depthfilter", false);
   o.seed_convergence_sigma2_thresh =
       vk::param<double>(pnh, "seed_convergence_sigma2_thresh", 200.0);
   o.mappoint_convergence_sigma2_thresh =

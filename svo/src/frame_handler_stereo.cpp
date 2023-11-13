@@ -86,8 +86,8 @@ UpdateResult FrameHandlerStereo::processFirstFrame()
   frame_utils::getSceneDepth(new_frames_->at(0), depth_median_, depth_min_, depth_max_);
   depth_filter_->addKeyframe(new_frames_->at(0), depth_median_, 0.5*depth_min_, depth_median_*1.5);
 
-
-  SVO_INFO_STREAM("Init: Selected first frame.");
+  
+  SVO_INFO_STREAM("Init: Selected first frame."<<new_frames_->at(0)->numFeatures()<<new_frames_->at(0)->numSegments()<<new_frames_->at(1)->numFeatures()<<new_frames_->at(1)->numSegments());
   stage_ = Stage::kTracking;
   tracking_quality_ = TrackingQuality::kGood;
   return UpdateResult::kKeyframe;
@@ -105,8 +105,10 @@ UpdateResult FrameHandlerStereo::processFrame()
   // STEP 2: Map Reprojection & Feature Align
   n_tracked_features = projectMapInFrame();
 
+#ifdef SEGMENT_ENABLE
   // STEP 2.5: Map Reprojection & Segment 
-  size_t n_tracked_segments = projectMapInFrameAddSegment();
+  size_t n_tracked_segments = projectMapInFrameAddSegment();// in this line it cause the history line project to current frame ,but not clearly code the information
+#endif
 
   if(n_tracked_features < options_.quality_min_fts)
   {
@@ -131,7 +133,6 @@ UpdateResult FrameHandlerStereo::processFrame()
   {
     return makeKeyframe(); // force stereo triangulation to recover
   }
-
   // ---------------------------------------------------------------------------
   // select keyframe
   frame_utils::getSceneDepth(new_frames_->at(0), depth_median_, depth_min_, depth_max_);
@@ -139,7 +140,7 @@ UpdateResult FrameHandlerStereo::processFrame()
   {
     for(size_t i=0; i<new_frames_->size(); ++i)
     {
-      // CHECK( 0!=overlap_kfs_.at(i)[0]->seg_track_id_vec_.size())<<overlap_kfs_.at(i)[0]->seg_track_id_vec_.size()<<"img0";
+      // CHECK( 0!=overlap_kfs_.at(i)[0]->seg_track_id_vec_.size())<<overlap_kfs_.at(i)[0]-0>seg_track_id_vec_.size()<<"img0";
       // CHECK( 0!=overlap_kfs_.at(i)[1]->seg_track_id_vec_.size())<<overlap_kfs_.at(i)[1]->seg_track_id_vec_.size()<<"img1";
       // overlap_kfs_.at(i)[0]->check_segment_infolist_vaild();
       // overlap_kfs_.at(i)[1]->check_segment_infolist_vaild();
@@ -164,10 +165,12 @@ UpdateResult FrameHandlerStereo::makeKeyframe()
   if(new_frames_->numLandmarks() < options_.kfselect_numkfs_lower_thresh)
   {
     setDetectorOccupiedCells(0, stereo_triangulation_->feature_detector_);
+    setSegmentDetectorOccupiedCells(0, stereo_triangulation_->segment_detector_);
     new_frames_->at(other_id)->setKeyframe();
     map_->addKeyframe(new_frames_->at(other_id),
                       bundle_adjustment_type_==BundleAdjustmentType::kCeres);
     upgradeSeedsToFeatures(new_frames_->at(other_id));
+    upgradeSegmentSeedsToFeatures(new_frames_->at(other_id));
     stereo_triangulation_->compute(new_frames_->at(0), new_frames_->at(1));
   }
 
@@ -177,12 +180,14 @@ UpdateResult FrameHandlerStereo::makeKeyframe()
   map_->addKeyframe(new_frames_->at(kf_id),
                     bundle_adjustment_type_==BundleAdjustmentType::kCeres);
   upgradeSeedsToFeatures(new_frames_->at(kf_id));
+  upgradeSegmentSeedsToFeatures(new_frames_->at(kf_id));
 
   // init new depth-filters, set feature-detection grid-cells occupied that
   // already have a feature
   {
     DepthFilter::ulock_t lock(depth_filter_->feature_detector_mut_);
     setDetectorOccupiedCells(kf_id, depth_filter_->feature_detector_);
+    setSegmentDetectorOccupiedCells(kf_id, depth_filter_->segment_detector_);
   } // release lock
   depth_filter_->addKeyframe(
         new_frames_->at(kf_id), depth_median_, 0.5*depth_min_, depth_median_*1.5);
@@ -191,14 +196,30 @@ UpdateResult FrameHandlerStereo::makeKeyframe()
 
   // TEST
   // {
+  //  for(size_t i =0;i<new_frames_->at(0)->num_segments_;i++)
+  //  {
+  //     if(isSeed(new_frames_->at(0)->type_vec_[i])&&(
+  //     new_frames_->at(0)->seg_invmu_sigma2_a_b_vec_.col(i*2).array().unaryExpr([](double v){ return std::isinf(v)||std::isnan(v); })).any())
+  //     {
+  //       CHECK(false)<<static_cast<int>(new_frames_->at(0)->type_vec_[i])<<" "<<new_frames_->at(0)->seg_invmu_sigma2_a_b_vec_.col(i*2)<<std::endl;
+  //     }
+  //  }
+          // CHECK(!(state_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
+          // CHECK(!(state_s.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
   if(options_.update_seeds_with_old_keyframes)
   {
+    // std::cout<<"update with old"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(0) }, last_frames_->at(0));
+    // std::cout<<"n0lo"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(0) }, last_frames_->at(1));
+    // std::cout<<"n0l1"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(1) }, last_frames_->at(0));
+    // std::cout<<"n1lo"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(1) }, last_frames_->at(1));
+    // std::cout<<"n1l1"<<std::endl;
     for(const FramePtr& old_keyframe : overlap_kfs_.at(0))
     {
+      if(old_keyframe==last_frames_->at(0))continue;
       depth_filter_->updateSeeds({ new_frames_->at(0) }, old_keyframe);
       depth_filter_->updateSeeds({ new_frames_->at(1) }, old_keyframe);
     }

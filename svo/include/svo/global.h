@@ -57,6 +57,8 @@ namespace svo
   typedef std::weak_ptr<Feature> FeatureWeakPtr;
   class Point;
   typedef std::shared_ptr<Point> PointPtr;
+  class Line;
+  typedef std::shared_ptr<Line> LinePtr;
   class ImuHandler;
   typedef std::shared_ptr<ImuHandler> ImuHandlerPtr;
   class SparseImgAlignBase;

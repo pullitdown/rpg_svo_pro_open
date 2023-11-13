@@ -758,7 +758,7 @@ size_t FrameHandlerBase::projectMapInFrame()
   return n_total_ftrs;
 }
 
-
+#ifdef SEGMENT_ENABLE
 size_t FrameHandlerBase::projectMapInFrameAddSegment()
 {
   VLOG(40) << "Project map segment in frame.";
@@ -778,7 +778,7 @@ size_t FrameHandlerBase::projectMapInFrameAddSegment()
 
   }
 
-  std::vector<std::vector<SegmentPtr>> trash_segments;
+  std::vector<std::vector<LinePtr>> trash_segments;
   trash_segments.resize(cams_->numCameras());
   if (options_.use_async_reprojectors && cams_->numCameras() > 1)
   {
@@ -787,7 +787,7 @@ size_t FrameHandlerBase::projectMapInFrameAddSegment()
     for (size_t camera_idx = 0; camera_idx < cams_->numCameras(); ++camera_idx)//as for the num of camera 
     {
 
-      auto func_seg = std::bind(&Reprojector::reprojectFrames, reprojectors_.at(camera_idx).get(),
+      auto func_seg = std::bind(&Reprojector::reprojectFramesSegment, reprojectors_.at(camera_idx).get(),
                             new_frames_->at(camera_idx), overlap_kfs_.at(camera_idx), trash_segments.at(camera_idx));
       reprojector_workers.push_back(std::async(std::launch::async, func_seg));
     }
@@ -801,7 +801,7 @@ size_t FrameHandlerBase::projectMapInFrameAddSegment()
     for (size_t camera_idx = 0; camera_idx < cams_->numCameras(); ++camera_idx)
     {
 
-      reprojectors_.at(camera_idx)->reprojectFrames(
+      reprojectors_.at(camera_idx)->reprojectFramesSegment(
             new_frames_->at(camera_idx), overlap_kfs_.at(camera_idx),
             trash_segments.at(camera_idx));
     }
@@ -847,7 +847,7 @@ size_t FrameHandlerBase::projectMapInFrameAddSegment()
   return n_total_ftrs;
 }
 
-
+#endif
 
 //------------------------------------------------------------------------------
 size_t FrameHandlerBase::optimizePose()
@@ -1021,6 +1021,84 @@ void FrameHandlerBase::upgradeSeedsToFeatures(const FramePtr& frame)
   if (ratio > 0.2)
   {
     LOG(WARNING) << ratio * 100 << "% updated seeds are unconverged.";
+  }
+}
+
+
+void FrameHandlerBase::upgradeSegmentSeedsToFeatures(const FramePtr& frame)
+{
+  VLOG(40) << "Upgrade segment seeds to features";
+  size_t update_count = 0;
+  size_t unconverged_cnt = 0;
+  for (size_t i = 0; i < frame->num_segments_; ++i)
+  {
+    if (frame->seg_landmark_vec_[i])//lankmark is 3d point and the info relate corresponing frame
+    {
+      const FeatureType& type = frame->seg_type_vec_[i];
+      if (type == FeatureType::kSegment )
+      {
+        frame->seg_landmark_vec_[i]->addObservation(frame, i);
+      }
+      else
+      {
+        CHECK(isFixedSegmentLandmark(type))<<static_cast<int>(type);
+        frame->seg_landmark_vec_[i]->addObservation(frame, i);
+      }
+    }
+    else if (frame->seg_seed_ref_vec_[i].keyframe)
+    {
+      if (isUnconvergedSeed(frame->seg_type_vec_[i]))
+      {
+        unconverged_cnt++;
+      }
+      SeedRef& ref = frame->seg_seed_ref_vec_[i];
+
+      // In multi-camera case, it might be that we already created a 3d-point
+      // for this seed previously when processing another frame from the bundle.
+      LinePtr Line3d = ref.keyframe->seg_landmark_vec_[ref.seed_id];
+      if (Line3d == nullptr)
+      {
+        // That's not the case. Therefore, create a new 3d point.
+        Position xyz_world_s =
+            ref.keyframe->T_world_cam() *
+            ref.keyframe->getSegmentSeedPosInFrame(ref.seed_id).col(0);
+            
+        Position xyz_world_e =
+            ref.keyframe->T_world_cam() *
+            ref.keyframe->getSegmentSeedPosInFrame(ref.seed_id).col(1);
+        Line3d = std::make_shared < Line > (xyz_world_s,xyz_world_e);
+        ref.keyframe->seg_landmark_vec_[ref.seed_id] = Line3d;
+        ref.keyframe->seg_track_id_vec_[ref.seed_id] = Line3d->id();
+        Line3d->addObservation(ref.keyframe, ref.seed_id);
+      }
+
+      // add reference to current frame.
+      frame->seg_landmark_vec_[i] = Line3d;
+      frame->seg_track_id_vec_[i] = Line3d->id();
+      Line3d->addObservation(frame, i);
+      if (isSegment(ref.keyframe->seg_type_vec_[ref.seed_id]))
+      {
+        ref.keyframe->seg_type_vec_[ref.seed_id] = FeatureType::kSegment;
+        frame->seg_type_vec_[i] = FeatureType::kSegment;
+      }
+      else
+      {
+        CHECK(false) << "Seed-Type not known";
+      }
+      ++update_count;
+    }
+
+    // when using the feature-wrapper, we might copy some old references?
+    frame->seg_seed_ref_vec_[i].keyframe.reset();
+    frame->seg_seed_ref_vec_[i].seed_id = -1;
+  }
+  VLOG(5) << "NEW KEYFRAME: Updated "
+          << update_count << "segment seeds to features in reference frame, "
+          << "including " << unconverged_cnt << " unconverged segment.\n";
+  const double ratio = (1.0 * unconverged_cnt) / update_count;
+  if (ratio > 0.2)
+  {
+    LOG(WARNING) << ratio * 100 << "% updated segment seeds are unconverged.";
   }
 }
 
@@ -1308,6 +1386,7 @@ void FrameHandlerBase::setDetectorOccupiedCells(
 {
   const Reprojector& rep = *reprojectors_.at(reprojector_grid_idx);
   CHECK_EQ(feature_detector->grid_.size(), rep.grid_->size());
+  // std::cout<<feature_detector->grid_.size()<<std::endl;
   feature_detector->grid_.occupancy_ = rep.grid_->occupancy_;
   if (rep.fixed_landmark_grid_)
   {
@@ -1316,6 +1395,24 @@ void FrameHandlerBase::setDetectorOccupiedCells(
       if (rep.fixed_landmark_grid_->isOccupied(idx))
       {
         feature_detector->grid_.occupancy_[idx] = true;
+      }
+    }
+  }
+}
+
+void FrameHandlerBase::setSegmentDetectorOccupiedCells(
+    const size_t reprojector_grid_idx, const SegmentDetectorConstPtr& segment_detector)
+{
+  const Reprojector& rep = *reprojectors_.at(reprojector_grid_idx);
+  CHECK_EQ(segment_detector->grid_.size(), rep.grid_->size());
+  segment_detector->grid_.occupancy_ = rep.grid_->occupancy_;
+  if (rep.fixed_landmark_grid_)
+  {
+    for (size_t idx = 0; idx < rep.fixed_landmark_grid_->size(); idx++)
+    {
+      if (rep.fixed_landmark_grid_->isOccupied(idx))
+      {
+        segment_detector->grid_.occupancy_[idx] = true;
       }
     }
   }

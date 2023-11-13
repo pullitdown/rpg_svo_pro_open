@@ -19,7 +19,8 @@
 #include <svo/direct/matcher.h>
 #include <svo/direct/feature_detection.h>
 #include <svo/direct/feature_detection_utils.h>
-
+#define NAME_VALUE_LOG(x) std::cout << #x << ": \n" << (x) << std::endl;
+#define STR_LOG(x) std::cout<<x<<std::endl;
 #define SEGMENT_ENABLE
 namespace svo
 {
@@ -121,8 +122,8 @@ namespace svo
         (sec_feature_detector_ ? sec_feature_detector_->closeness_check_grid_.size() : 0u));
 #ifdef SEGMENT_ENABLE
     frame->resizeSegmentStorage(frame->num_segments_+ options_.max_n_seg_seeds_per_frame);
+    CHECK_EQ(frame->seg_vec_.cols(), static_cast<long int>(frame->num_segments_+options_.max_n_seg_seeds_per_frame));
 #endif
-    CHECK_EQ(frame->seg_vec_.cols(), frame->num_segments_+options_.max_n_seg_seeds_per_frame);
     if (thread_ == nullptr)
     {
       ulock_t lock(feature_detector_mut_);
@@ -221,6 +222,16 @@ namespace svo
               job.min_depth, job.max_depth, job.mean_depth);
         }
       }
+      else if (job.type == Job::UPDATE)
+      {
+        // We get higher precision (10x in the synthetic blender dataset)
+        // when we keep updating seeds even though they are converged until
+        // the frame handler selects a new keyframe.
+        depth_filter_utils::updateSeed(
+            *job.cur_frame, *job.ref_frame, job.ref_frame_seed_index, *matcher_,
+            options_.seed_convergence_sigma2_thresh, true, false);
+      }
+#ifdef SEGMENT_ENABLE      
       else if (job.type == Job::SEED_INIT_SEGMENT)
       {
         ulock_t lock(feature_detector_mut_);
@@ -231,21 +242,14 @@ namespace svo
               options_.max_n_seg_seeds_per_frame,
               job.min_depth, job.max_depth, job.mean_depth);
       }
-      else if (job.type == Job::UPDATE)
-      {
-        // We get higher precision (10x in the synthetic blender dataset)
-        // when we keep updating seeds even though they are converged until
-        // the frame handler selects a new keyframe.
-        depth_filter_utils::updateSeed(
-            *job.cur_frame, *job.ref_frame, job.ref_frame_seed_index, *matcher_,
-            options_.seed_convergence_sigma2_thresh, true, false);
-      }
       else if (job.type == Job::UPDATE_SEGMENT)
       {
-        
+        BearingVector s_f_vec,e_f_vec;
+        Segment seg;
         depth_filter_utils::updateSegmentSeed(*job.cur_frame, *job.ref_frame, job.ref_frame_seed_index, *matcher_,
-                                              options_.seed_convergence_sigma2_thresh, true, false);
+                                              options_.seed_convergence_sigma2_thresh,s_f_vec,e_f_vec,seg, true, false);
       }
+#endif
     }
   }
 
@@ -284,15 +288,16 @@ namespace svo
         }
 
 #ifdef SEGMENT_ENABLE
+        BearingVector s_f_vec,e_f_vec;
         for (size_t i = 0; i < ref_frame->num_segments_; ++i)
         {
           const FeatureType &type = ref_frame->seg_type_vec_[i];
           if (isSeed(type))
           {
             double cur_thresh = options_.seed_convergence_sigma2_thresh;
-
+            Segment seg_;
             if (depth_filter_utils::updateSegmentSeed(
-                    *cur_frame, *ref_frame, i, *matcher_, cur_thresh, true, false))
+                    *cur_frame, *ref_frame, i, *matcher_, cur_thresh,s_f_vec,e_f_vec,seg_, true, false))
             {
               ++n_seg_success;
             }
@@ -338,7 +343,21 @@ namespace svo
   }
     namespace depth_filter_utils
     {
+          std::ostream& operator<<(std::ostream& os, const SegmentWrapper& wrapper)
+{
+    os << "Type: " << static_cast<int>(wrapper.type) << "\n";
+    os << "Segment: " << wrapper.segment.transpose() << "\n"; // Assuming Segment is a matrix or vector
+    os << "Start BearingVector: " << wrapper.s_f.transpose() << "\n"; // Assuming BearingVector is a matrix or vector
+    os << "End BearingVector: " << wrapper.e_f.transpose() << "\n"; // Assuming BearingVector is a matrix or vector
+    os << "Gradient Vector: " << wrapper.grad.transpose() << "\n"; // Assuming GradientVector is a matrix or vector
+    os << "Score: " << wrapper.score << "\n";
+    os << "Level: " << wrapper.level << "\n";
+    // os << "Line Landmark: " << wrapper.line_landmark->spos_ <<" "<<wrapper.line_landmark->epos_ <<"\n"; // Assuming LinePtr is a pointer to some type that has an operator<<
+    os << "Seed Reference: " << wrapper.seed_ref.seed_id << "\n";
+    os << "Track ID: " << wrapper.track_id << "\n";
 
+    return os;
+}
       void initializeSeeds(
           const FramePtr &frame,
           const AbstractDetector::Ptr &feature_detector,
@@ -537,14 +556,23 @@ namespace svo
           frame->seg_invmu_sigma2_a_b_vec_.block(0, 0, 1, seg_n_old * 2).setConstant(seed::getMeanFromDepth(depth_mean));
           frame->seg_invmu_sigma2_a_b_vec_.block(1, 0, 1, seg_n_old * 2).setConstant(seed::getInitSigma2FromMuRange(frame->seed_mu_range_));
           frame->seg_invmu_sigma2_a_b_vec_.block(2, 0, 2, seg_n_old * 2).setConstant(10.0);
+               
         }
         else
         {
           frame->seg_invmu_sigma2_a_b_vec_.block(0, seg_n_old * 2, 1, seg_n_new * 2).setConstant(seed::getMeanFromDepth(depth_mean));
           frame->seg_invmu_sigma2_a_b_vec_.block(1, seg_n_old * 2, 1, seg_n_new * 2).setConstant(seed::getInitSigma2FromMuRange(frame->seed_mu_range_));
           frame->seg_invmu_sigma2_a_b_vec_.block(2, seg_n_old * 2, 2, seg_n_new * 2).setConstant(10.0);
+                 
         }
 
+        // std::cout<<"after depth filter frame"<<std::endl;
+        // for(size_t i=0;i<frame->num_segments_;i++)
+        // {
+        //   if()
+        // }
+
+        
         SVO_DEBUG_STREAM("DepthFilter: " << frame->cam()->getLabel() << " Initialized " << seg_n_new << " new segment");
       }
   //     void initializeSeeds(
@@ -870,9 +898,13 @@ namespace svo
           const size_t &seed_index,
           Matcher &matcher,
           const FloatType sigma2_convergence_threshold,
+          Eigen::Ref<BearingVector> s_f_cur,
+         Eigen::Ref<BearingVector> e_f_cur,
+         Eigen::Ref<Segment> seg_cur,
           const bool check_visibility,
           const bool check_convergence,
-          const bool use_vogiatzis_update) // for a single seed update
+          const bool use_vogiatzis_update
+          ) // for a single seed update
       {
         if (cur_frame.id() == ref_frame.id())
         {
@@ -898,6 +930,8 @@ namespace svo
 
         // Create wrappers
         SegmentWrapper ref_ftr = ref_frame.getSegmentWrapper(seed_index);
+
+
         Eigen::Ref<SeedState> state_s = ref_frame.seg_invmu_sigma2_a_b_vec_.col(seed_index * 2);
         Eigen::Ref<SeedState> state_e = ref_frame.seg_invmu_sigma2_a_b_vec_.col(seed_index * 2 + 1);
 
@@ -926,20 +960,26 @@ namespace svo
           matcher.options_.align_1d = false;
 
         // sanity checks
-        if (std::isnan(seed::mu(state_s)) || std::isnan(seed::mu(state_e)))
+        if (std::isnan(seed::mu(state_s)) || std::isnan(seed::mu(state_e)) )
           SVO_ERROR_STREAM("seed is nan!");
+
+        // for(size_t i=0;i<4;i++)
+        // if(std::isnan(state_s(i))||std::isnan(state_e(i))){
+        //   std::cout<<"in updateSegmentSeed\nstate_e"<<state_e<<"\nstate_s\n"<<state_s<<std::endl;
+        //   return false;}
 
         if (std::isnan(std::sqrt(seed::sigma2(state_s))) || std::isnan(std::sqrt(seed::sigma2(state_e))))
           LOG(WARNING) << "seed sigma is nan!" << seed::sigma2(state_s) << " " << seed::sigma2(state_e) << ", sq" << std::sqrt(seed::sigma2(state_s)) << " " << std::sqrt(seed::sigma2(state_e)) << ", check-convergence = " << check_convergence;
 
         // search epipolar line, find match, and triangulate to find new depth z
         double depth_s, depth_e;
-        svo::BearingVector s_f_cur, e_f_cur;
-        svo::Segment seg_cur;
+        // svo::BearingVector s_f_cur, e_f_cur;
+        // svo::Segment seg_cur;
         std::vector<Matcher::MatchResult> res =
             matcher.findEpipolarMatchDirectSegment(
                 ref_frame, cur_frame, ref_ftr, seed::getInvDepth(state_s),
-                seed::getInvMinDepth(state_s), seed::getInvMaxDepth(state_s), depth_s,
+                seed::getInvMinDepth(state_s), seed::getInvMaxDepth(state_s), 
+                depth_s,
                 seed::getInvDepth(state_e),
                 seed::getInvMinDepth(state_e), seed::getInvMaxDepth(state_e), depth_e, seg_cur, s_f_cur, e_f_cur);
 
@@ -962,6 +1002,8 @@ namespace svo
         const FloatType depth_sigma_e = computeTau(T_cur_ref.inverse(), ref_ftr.e_f, depth_e, px_error_angle); // compute the nucorrence
 
         // update the estimate
+        const SeedState t_s=state_s;
+        const SeedState t_e=state_e;
         if (use_vogiatzis_update)
         {
           if (!updateFilterVogiatzis(
@@ -978,6 +1020,10 @@ namespace svo
             ref_ftr.type = FeatureType::KSegmentOutlier;
             return false;
           }
+            // CHECK(!(state_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())<<t_s<<"\n"<<t_e<<'\n'<<state_s<<"\n"<<state_e<<'\n'<<depth_s<<" "<<depth_e<<" "<<depth_sigma_s<<" "<<depth_sigma_e<<" "<< ref_frame.seed_mu_range_<<" "<<ref_frame.seed_mu_range_<<"param:\n"<< seed::getMeanFromDepth(depth_s)<<"\n"<<seed::getSigma2FromDepthSigma(depth_s, depth_sigma_s);
+            // CHECK(!(state_s.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())<<t_s<<"\n"<<t_e<<'\n'<<state_s<<"\n"<<state_e<<'\n'<<depth_s<<" "<<depth_e<<" "<<depth_sigma_s<<" "<<depth_sigma_e<<" "<< ref_frame.seed_mu_range_<<" "<<ref_frame.seed_mu_range_<<"param:\n"<< seed::getMeanFromDepth(depth_s)<<"\n"<<seed::getSigma2FromDepthSigma(depth_s, depth_sigma_s);
+
+        // CHECK(!(state_s.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())<<t_s<<"\n"<<t_e<<'\n'<<state_s<<"\n"<<state_e;
         }
         else
         {
@@ -990,9 +1036,11 @@ namespace svo
                   seed::getSigma2FromDepthSigma(depth_e, depth_sigma_e),
                   state_e))
           {
+            
             ref_ftr.type = FeatureType::KSegmentOutlier;
             return false;
           }
+
         }
 
         // check if converged
@@ -1003,9 +1051,14 @@ namespace svo
                               ref_frame.seed_mu_range_,
                               sigma2_convergence_threshold))
         {
+
           if (ref_ftr.type == FeatureType::kSegmentSeed)
             ref_ftr.type = FeatureType::kSegmentSeedConverged;
         }
+        // std::cout<<"after updatesegmentseed"<<std::endl;
+        // NAME_VALUE_LOG(ref_frame.seg_invmu_sigma2_a_b_vec_.transpose());
+        // for(auto a:ref_frame.seg_type_vec_)std::cout<<static_cast<int>(a)<<std::endl;
+
         return true;
       }
 
@@ -1023,6 +1076,7 @@ namespace svo
         FloatType &b = mu_sigma2_a_b(3);
 
         const FloatType norm_scale = std::sqrt(sigma2 + tau2);
+        // std::cout<<sigma2<<std::endl;
         if (std::isnan(norm_scale))
         {
           LOG(WARNING) << "Update Seed: Sigma2+Tau2 is NaN";
@@ -1033,8 +1087,24 @@ namespace svo
         const FloatType s2 = 1.0 / (1.0 / sigma2 + 1.0 / tau2);
         const FloatType m = s2 * (mu / sigma2 + z / tau2);
         const FloatType uniform_x = 1.0 / mu_range;
+
+        if (std::isnan(uniform_x))
+        {
+          std::cout << "uniform_x"<<uniform_x<<std::endl;
+          return false;
+        }
         FloatType C1 = a / (a + b) * vk::normPdf<FloatType>(z, mu, norm_scale);
         FloatType C2 = b / (a + b) * uniform_x;
+        if (std::isnan(C1))
+        {
+          // std::cout << "C1"<<C1<<std::endl;
+          return false;
+        }
+        if (std::isnan(C2))
+        {
+          // std::cout << "C2"<<C2<<std::endl;
+          return false;
+        }
         const FloatType normalization_constant = C1 + C2;
         C1 /= normalization_constant;
         C2 /= normalization_constant;
@@ -1047,7 +1117,26 @@ namespace svo
         mu = mu_new;
         a = (e - f) / (f - e / f);
         b = a * (1.0 - f) / f;
-
+        if (std::isnan(sigma2))
+        {
+          // std::cout << "sigma2"<<sigma2<<std::endl;
+          return false;
+        }
+        if (std::isnan(mu))
+        {
+          // std::cout << "mu"<<mu<<std::endl;
+          return false;
+        }
+        if (std::isnan(a))
+        {
+          // std::cout << "a"<<a<<std::endl;
+          return false;
+        }
+        if (std::isnan(b))
+        {
+          // std::cout << "b"<<b<<std::endl;
+          return false;
+        }
         // TODO: This happens sometimes.
         if (sigma2 < 0.0)
         {
@@ -1060,6 +1149,7 @@ namespace svo
           mu = 1.0;
           return false;
         }
+        
         return true;
       }
 

@@ -1,11 +1,18 @@
 project(svo_direct)
 cmake_minimum_required(VERSION 2.8.3)
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
+#set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 find_package(catkin_simple REQUIRED)
 catkin_simple(ALL_DEPS_REQUIRED)
+SET(CUDAFAST_ENABLE OFF)
+
+
+if(CUDAFAST_ENABLE)
 find_package(OpenCV REQUIRED core imgproc highgui cudafeatures2d)
+else()
+find_package(OpenCV REQUIRED core imgproc highgui )
+endif()
 
 include(SvoSetup)
 

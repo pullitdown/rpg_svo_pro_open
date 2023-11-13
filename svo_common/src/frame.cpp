@@ -83,7 +83,7 @@ void Frame::initFrame(const cv::Mat& img, size_t n_pyr_levels)
 void Frame::setKeyframe()
 {
   is_keyframe_ = true;
-  setKeyPoints();
+  setKeyPoints();//set frame five point to detect overloop
 }
 
 void Frame::deleteLandmark(const size_t& feature_index)
@@ -534,6 +534,8 @@ void createImgPyramid(const cv::Mat& img_level_0, int n_levels, ImgPyr& pyr)
 
 bool getSceneDepth(const FramePtr& frame, double& depth_median, double& depth_min, double& depth_max)
 {
+  CHECK_GT(static_cast<int>(frame->num_features_),0);
+  CHECK_GT(static_cast<int>(frame->num_segments_),-1);
   std::vector<double> depth_vec;
   depth_vec.reserve(frame->num_features_);
   depth_min = std::numeric_limits<double>::max();
@@ -558,12 +560,14 @@ bool getSceneDepth(const FramePtr& frame, double& depth_median, double& depth_mi
       continue;
     }
 
-    depth_vec.push_back(depth);
+    depth_vec.emplace_back(depth);
     depth_min = std::min(depth, depth_min);
     depth_max = std::max(depth, depth_max);
   }
 
   #ifdef SEGMENT_ENABLE
+  if(frame->num_segments_!=0)
+  depth_vec.reserve(frame->num_features_+frame->num_segments_*2);
     for(size_t i = 0; i < frame->num_segments_; ++i)// iterate over every point within the image 
   {
     if(frame->seg_landmark_vec_[i])
@@ -578,16 +582,16 @@ bool getSceneDepth(const FramePtr& frame, double& depth_median, double& depth_mi
           seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(0);
                const Position pos_e = seed_ref.keyframe->T_world_cam() *
           seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(1);
-      depth_s = (pos_s.col(0) - ref_pos).norm();
-      depth_e = (pos_e.col(1) - ref_pos).norm();
+      depth_s = (pos_s - ref_pos).norm();
+      depth_e = (pos_e - ref_pos).norm();
     }
     else
     {
       continue;
     }
 
-    depth_vec.push_back(depth_s);
-    depth_vec.push_back(depth_e);
+    depth_vec.emplace_back(depth_s);
+    depth_vec.emplace_back(depth_e);
     depth_min = std::min(depth_s, depth_min);
     depth_min = std::min(depth_e, depth_min);
     depth_max = std::max(depth_s, depth_max);
@@ -624,11 +628,14 @@ void computeSegmentNormalizedBearingVectors(
 {
   CHECK_NOTNULL(f_vec);
   std::vector<bool> success;
+  // std::cout<<"seg_vec:\n"<<seg_vec<<std::endl;
   cam.backProject3Segments(seg_vec, f_vec, &success);
   for (const bool s : success) {
     CHECK(s);
   }
+  // std::cout<<"\n -----------------f_norm_vec---------------"<<f_vec->colwise().norm().array()<<std::endl;
   *f_vec = f_vec->array().rowwise() / f_vec->colwise().norm().array();//contain the start and end point bearing vector
+  // std::cout<<"------------f_vec-----------\n"<<*f_vec<<std::endl;
 }
 
 } // namespace frame_utils

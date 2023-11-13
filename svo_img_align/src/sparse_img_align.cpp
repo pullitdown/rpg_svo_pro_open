@@ -20,7 +20,8 @@
 #include <svo/common/point.h>
 #include <svo/common/camera.h>
 #include <svo/common/seed.h>
-#define SEGMENT_ENABLE
+#define NAME_VALUE_LOG(x) std::cout << #x << ": \n" << (x) << std::endl;
+
 namespace svo
 {
 
@@ -42,10 +43,7 @@ namespace svo
     // Select all visible features and subsample if required.
     fts_vec_.clear();
     size_t n_fts_to_track = 0;
-#ifdef SEGMENT_ENABLE
-    segs_vec_.clear();
-    size_t n_segs_to_track = 0;
-#endif
+
     for (auto frame : ref_frames->frames_)
     {
       std::vector<size_t> fts;
@@ -53,28 +51,39 @@ namespace svo
           *frame, options_.max_level, patch_size_with_border_, fts);
       n_fts_to_track += fts.size();
       fts_vec_.push_back(fts); // shape=ncamera*feature
+    }
 #ifdef SEGMENT_ENABLE
-
+    segs_vec_.clear();
+    size_t n_segs_to_track = 0;
+    int idx=0;
+    for (auto frame : ref_frames->frames_)
+    {
+      
       std::vector<size_t> segs;
       sparse_img_align_utils::extractSegmentsSubset(*frame, options_.max_level, patch_size_with_border_, segs);
       n_segs_to_track += segs.size();
       segs_vec_.push_back(segs);
-
-#endif
+      // std::cout<<idx<<" seg subset info,now extra segment len"<<segs.size() <<std::endl;
+      // for(auto a:segs){std::cout<<a<<" frame->seg_f_vec_"<<frame->seg_f_vec_.col(a*2)<<" "<<frame->seg_f_vec_.col(a*2+1)<<std::endl;}
+      // std::cout<<std::endl;
+      idx++;
     }
-    SVO_DEBUG_STREAM("Img Align: Tracking " << n_fts_to_track << " features, " << n_segs_to_track << " segments.");
+
+    
+    SVO_DEBUG_STREAM("Img Align: Tracking "  << n_segs_to_track << " segments.");
+    if (n_segs_to_track == 0)
+    {
+      SVO_ERROR_STREAM("SparseImgAlign: no segments to track! use feature for vio only!");
+      // return 0;
+    }
+#endif
+    SVO_DEBUG_STREAM("Img Align: Tracking " << n_fts_to_track << " features, ");
+    
     if (n_fts_to_track == 0)
     {
       SVO_ERROR_STREAM("SparseImgAlign: no features to track!");
       return 0;
     }
-#ifdef SEGMENT_ENABLE
-    if (n_segs_to_track == 0)
-    {
-      SVO_ERROR_STREAM("SparseImgAlign: no segments to track!");
-      return 0;
-    }
-#endif
     // set member variables
     ref_frames_ = ref_frames;
     cur_frames_ = cur_frames;
@@ -95,7 +104,7 @@ namespace svo
     uv_cache_.resize(Eigen::NoChange, n_fts_to_track + n_segs_to_track * 2);
     xyz_ref_cache_.resize(Eigen::NoChange, n_fts_to_track + n_segs_to_track * 2);
     jacobian_proj_cache_.resize(Eigen::NoChange, n_fts_to_track * 2 + n_segs_to_track * 4);
-    jacobian_cache_.resize(Eigen::NoChange, n_fts_to_track * patch_area_ + n_segs_to_track * 2);
+    jacobian_cache_.resize(Eigen::NoChange, n_fts_to_track * patch_area_ + n_segs_to_track * 2*patch_area_);
     residual_cache_.resize(patch_area_, n_fts_to_track + n_segs_to_track * 2);
     visibility_mask_.resize(n_fts_to_track + n_segs_to_track * 2, Eigen::NoChange);
     ref_patch_cache_.resize(patch_area_, n_fts_to_track + n_segs_to_track * 2);
@@ -120,7 +129,9 @@ namespace svo
           options_.use_distortion_jacobian,
           feature_counter, uv_cache_,
           xyz_ref_cache_, jacobian_proj_cache_);
+
     }
+
 #ifdef SEGMENT_ENABLE
     size_t segment_counter = 0;
     for (size_t i = 0; i < ref_frames_->size(); ++i)
@@ -130,8 +141,21 @@ namespace svo
           options_.use_distortion_jacobian,
           feature_counter, segment_counter, uv_cache_,
           xyz_ref_cache_, jacobian_proj_cache_);
+    // std::cout<<"frame id------------------- no"<<i<<std::endl;          
+    // NAME_VALUE_LOG(ref_frames_->at(i)->num_segments_);
+    // for(auto single_idx:segs_vec_.at(i))
+    // NAME_VALUE_LOG(single_idx);
+    // NAME_VALUE_LOG(segs_vec_.at(i).size());
     }
+    // NAME_VALUE_LOG(feature_counter*2+segment_counter*4);
+    // NAME_VALUE_LOG(jacobian_proj_cache_);
+    // NAME_VALUE_LOG(xyz_ref_cache_);
+    // CHECK_EQ(static_cast<long unsigned int>(jacobian_proj_cache_.cols()),feature_counter*2+segment_counter*4);
+    // CHECK_EQ(static_cast<long unsigned int>(xyz_ref_cache_.cols()),feature_counter+segment_counter*2);
+    // std::cout<<"jacobian_proj_cache_ "<<jacobian_proj_cache_<<"\nlen:"<<jacobian_proj_cache_.cols()<<std::endl;
+    // std::cout<<"xyz_ref_cache_ "<<xyz_ref_cache_<<"\nlen:"<<xyz_ref_cache_.cols()<<std::endl;
 #endif
+
 
     for (level_ = options_.max_level; level_ >= options_.min_level; --level_)
     {
@@ -155,7 +179,7 @@ namespace svo
     return n_fts_to_track;
   }
 
-  double SparseImgAlign::evaluateError(
+  double SparseImgAlign::evaluateError_(
       const SparseImgAlignState &state,
       HessianMatrix *H,
       GradientVector *g)
@@ -198,7 +222,7 @@ namespace svo
     return chi2;
   }
 
-  double SparseImgAlign::evaluateErrorAddSegment(
+  double SparseImgAlign::evaluateError(
       const SparseImgAlignState &state,
       HessianMatrix *H,
       GradientVector *g)
@@ -206,7 +230,6 @@ namespace svo
     if (!have_cache_) // is reset at every new level.
     {
       size_t feature_counter = 0;
-      size_t segment_counter = 0;
       for (size_t i = 0; i < ref_frames_->size(); ++i) // for bundle's frame such
       {
         sparse_img_align_utils::precomputeJacobiansAndRefPatches(
@@ -217,7 +240,13 @@ namespace svo
             options_.estimate_illumination_offset,
             feature_counter,
             jacobian_cache_, ref_patch_cache_);
+
+      }
 #ifdef SEGMENT_ENABLE
+      size_t segment_counter = 0;
+
+      for (size_t i = 0; i < ref_frames_->size(); ++i) // for bundle's frame such
+      {
         sparse_img_align_utils::precomputeJacobiansAndRefPatchesAddSegment(
             ref_frames_->at(i), uv_cache_,
             jacobian_proj_cache_, level_, patch_size_,
@@ -227,11 +256,9 @@ namespace svo
             options_.estimate_illumination_gain,
             options_.estimate_illumination_offset,
             jacobian_cache_, ref_patch_cache_);
-#endif
       }
-
-      CHECK_EQ(jacobian_cache_.cols(), (feature_counter + segment_counter * 2) * patch_size_ * patch_size_);
-      CHECK_EQ(ref_patch_cache_.cols(), (feature_counter + segment_counter * 2) * patch_size_ * patch_size_);
+      // CHECK(!(jacobian_cache_.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
+#endif
       have_cache_ = true;
     }
 
@@ -249,20 +276,32 @@ namespace svo
           state.alpha, state.beta,
           ref_patch_cache_, xyz_ref_cache_,
           feature_counter, match_pxs, residual_cache_, visibility_mask_);
+    }
 #ifdef SEGMENT_ENABLE
-
+    for (size_t i = 0; i < ref_frames_->size(); ++i)
+    {
+      const Transformation T_cur_ref =
+          cur_frames_->at(i)->T_cam_imu() * state.T_icur_iref * ref_frames_->at(i)->T_imu_cam();
+      std::vector<Vector2d> *match_pxs = nullptr;
     sparse_img_align_utils::computeResidualsOfFrameAddSegment(
        cur_frames_->at(i), level_,
-          patch_size_, fts_vec_.at(i).size(), T_cur_ref,
+          patch_size_, segs_vec_.at(i).size(), T_cur_ref,
           state.alpha, state.beta,
           ref_patch_cache_, xyz_ref_cache_,
-          feature_counter,segment_counter,match_pxs, residual_cache_, visibility_mask_);
+          feature_counter,segment_counter,match_pxs, residual_cache_, visibility_mask_);// get the residuals error in each pixel
+    }
 #endif
-    } // compute the pixel luminance error
+     // compute the pixel luminance error
 
+    CHECK_EQ(segment_counter*2+feature_counter,static_cast<long unsigned int>(residual_cache_.cols()));
+    CHECK_EQ(segment_counter*2+feature_counter,static_cast<long unsigned int>(visibility_mask_.size()));
+    CHECK_EQ(static_cast<long unsigned int>(jacobian_cache_.cols()), (feature_counter + segment_counter * 2) * patch_size_ * patch_size_);
+    CHECK_EQ(static_cast<long unsigned int>(ref_patch_cache_.cols()), (feature_counter + segment_counter * 2) );
+    // std::cout<<"evaluate track segment"<<segment_counter<<"; trace feature"<<feature_counter<<std::endl;
     float chi2 = sparse_img_align_utils::computeHessianAndGradient(
         jacobian_cache_, residual_cache_,
         visibility_mask_, weight_scale_, weight_function_, H, g);
+    // std::cout<<"-----------chi2"<<chi2<<std::endl;
     return chi2;
   }
 
@@ -362,7 +401,7 @@ namespace svo
         const int u_tl_i = std::floor(u_tl);
         const int v_tl_i = std::floor(v_tl);
         if (!(u_tl_i < 0 || v_tl_i < 0 || u_tl_i + patch_size_wb >= cols_minus_two || v_tl_i + patch_size_wb >= rows_minus_two))
-          fts.push_back(i);
+          fts.emplace_back(i);
       }
       SVO_DEBUG_STREAM("Img Align: Maximum Number of Features = " << ref_frame.num_features_);
     }
@@ -372,24 +411,7 @@ namespace svo
                                const int patch_size_wb, // patch_size + border (usually 2 for gradient),
                                std::vector<size_t> &fts)
     {
-      // TODO(cfo): add seeds
-      //  if(fts.size() < 100)
-      //  {
-      //    std::unique_lock<decltype(ref_frame->seeds_mut_)> lock(ref_frame->seeds_mut_);
-      //    size_t n = 0;
-      //    for(const SeedPtr& seed : ref_frame->seeds_)
-      //    {
-      //      if(seed->is_converged_)
-      //      {
-      //        fts.push_back(seed->ftr_);
-      //        ++n;
-      //      }
-      //    }
-      //    SVO_DEBUG_STREAM("SparseImgAlign: add " << n << " additional seeds.");
-      //  }
-
-      // ignore any feature point, which does not project fully in the image
-      // checking on highest level is sufficient.
+      
       const FloatType scale = 1.0f / (1 << max_level);
       const cv::Mat &ref_img = ref_frame.img_pyr_.at(max_level);
       const int rows_minus_two = ref_img.rows - 2;
@@ -413,7 +435,41 @@ namespace svo
         const int v_tl_i_e = std::floor(v_tl_e);
         if (!(u_tl_i_s < 0 || v_tl_i_s < 0 || u_tl_i_s + patch_size_wb >= cols_minus_two || v_tl_i_s + patch_size_wb >= rows_minus_two) &&
             !(u_tl_i_e < 0 || v_tl_i_e < 0 || u_tl_i_e + patch_size_wb >= cols_minus_two || v_tl_i_e + patch_size_wb >= rows_minus_two))
-          fts.push_back(i);
+        {
+          fts.emplace_back(i);
+          
+          const SeedRef &seed_ref = ref_frame.seg_seed_ref_vec_[i];                                                                                    // must kown where to add the
+
+          if(!isSegmentSeed(ref_frame.seg_type_vec_[i])||seed_ref.keyframe==nullptr)continue;
+          // std::cout<<"in sparese_img_align"<<std::endl;
+          CHECK(seed_ref.keyframe!=nullptr)<<seed_ref.keyframe;
+          CHECK(seed_ref.seed_id>=0&& static_cast<size_t>(seed_ref.seed_id)<seed_ref.keyframe->num_segments_);
+          
+          const Eigen::Matrix<FloatType, 3, 1> pos_s = seed_ref.keyframe->T_world_cam() * 
+          seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(0); // seed ref normally in match step,update step
+          const Eigen::Matrix<FloatType, 3, 1> pos_e = seed_ref.keyframe->T_world_cam() * 
+          seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(1); // seed ref normally in match step,update step
+          // CHECK_EIGEN_HAVE_NAN(seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2),"in precomputeBaseCachesAddSegment");
+          // CHECK_EIGEN_HAVE_NAN(seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2+1),"in precomputeBaseCachesAddSegment");
+          //   if((pos_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+          //   {
+          //     std::cout<<"extractSegmentsSubset"<<std::endl;
+          //                 for(auto s:ref_frame.seg_type_vec_)
+          // std::cout<<static_cast<int>(s)<<" ";
+          //   fts.pop_back();
+          //   }
+          //  CHECK(!(pos_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())<<"cur segment idx"<<i<<" "
+          //  <<"current keyframe" << ref_frame.bundle_id_<<"  seed_ref id keyframe:\n"<<seed_ref.seed_id<<" "<<seed_ref.keyframe->bundle_id_
+          //   <<"\npos e\n"<<pos_e.transpose()<<"getSegmentSeedDepth(idx)\n"<<seed_ref.keyframe->getSegmentSeedDepth(seed_ref.seed_id)<<
+          //   " \nseg_f_vec:\n"<<seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2)<<ref_frame.seg_landmark_vec_[i]
+          //  <<"ref  type:\n"<<static_cast<int>(seed_ref.keyframe->seg_type_vec_[seed_ref.seed_id])<< " cur type "<<static_cast<int>(ref_frame.seg_type_vec_[i])
+          //   <<" seed_ref.seed_id\n"<<seed_ref.seed_id<<"cur seg_invmu_sigma2_a_b_vec_ :\n"<<
+          //   ref_frame.seg_invmu_sigma2_a_b_vec_.transpose()<<"ref seg_invmu_sigma2_a_b_vec_ :\n"<<seed_ref.keyframe->seg_invmu_sigma2_a_b_vec_.transpose()
+          //   ;
+
+
+        }
+
       }
       SVO_DEBUG_STREAM("Img Align: Maximum Number of segment = " << ref_frame.num_segments_);
     }
@@ -497,26 +553,55 @@ namespace svo
         // the reprojection errors in the reference image!!!
 
         FloatType depth_s = 0, depth_e = 0;
-        if (ref_frame.seg_landmark_vec_[i])
+        if (ref_frame.seg_landmark_vec_[i]!= nullptr)
         {
           depth_s = ((ref_frame.seg_landmark_vec_[i]->spos_ - ref_pos).norm());
           depth_e = ((ref_frame.seg_landmark_vec_[i]->epos_ - ref_pos).norm());
-        }
+        // CHECK(depth_s!=0)<<ref_frame.seg_landmark_vec_[i]->spos_<<" "<<depth_s<<" "<<depth_s<<" "<<ref_pos.transpose();
+
+        }// else if(isSegmentSeed(ref_frame.seg_type_vec_[i])&& ref_frame.seg_seed_ref_vec_[i].keyframe!=nullptr) becasue the add set
         else
         {
           const SeedRef &seed_ref = ref_frame.seg_seed_ref_vec_[i];                                                                                    // must kown where to add the
-          const Eigen::Matrix<FloatType, 3, 2> pos = seed_ref.keyframe->T_world_cam() * seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id); // seed ref normally in match step,update step
-          depth_s = (pos.col(0) - ref_pos).norm();
-          depth_e = (pos.col(1) - ref_pos).norm();
+          const Eigen::Matrix<FloatType, 3, 1> pos_s = seed_ref.keyframe->T_world_cam() * 
+          seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(0); // seed ref normally in match step,update step
+          const Eigen::Matrix<FloatType, 3, 1> pos_e = seed_ref.keyframe->T_world_cam() * 
+          seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(1); // seed ref normally in match step,update step
+          depth_s = (pos_s - ref_pos).norm();
+          depth_e = (pos_e - ref_pos).norm();
+          // CHECK_EIGEN_HAVE_NAN(seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2),"in precomputeBaseCachesAddSegment");
+          // CHECK_EIGEN_HAVE_NAN(seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2+1),"in precomputeBaseCachesAddSegment");
+          //  CHECK(!(pos_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+          //   <<"\n"<<pos_e.transpose()<<"getSegmentSeedDepth(idx)"<<seed_ref.keyframe->getSegmentSeedDepth(seed_ref.seed_id)<<
+          //   " seg_f_vec"<<seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2)<<"\n"<<seed_ref.keyframe->seg_f_vec_.col(seed_ref.seed_id*2+1)<<ref_frame.seg_landmark_vec_[i]
+          //  <<"ref  type:\n"<<static_cast<int>(seed_ref.keyframe->seg_type_vec_[seed_ref.seed_id])<< " cur "
+          //   <<" seed_ref.seed_id\n"<<seed_ref.seed_id<<"ref_farme seed_id :\n"<<ref_frame.seg_invmu_sigma2_a_b_vec_.col(i*2);
+
+        // CHECK(depth_s!=0)<<ref_frame.seg_f_vec_.col(i * 2).transpose()<<" "<<depth_s<<" "<<depth_s<<" "<<ref_pos.transpose();
+
+        //   NAME_VALUE_LOG(seed_ref.keyframe->T_world_cam().asVector());
+        // NAME_VALUE_LOG( seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(1));
+        // NAME_VALUE_LOG( seed_ref.keyframe->getSegmentSeedPosInFrame(seed_ref.seed_id).col(0));
+        // NAME_VALUE_LOG(pos_s);
+        // NAME_VALUE_LOG(pos_e);
+        // NAME_VALUE_LOG(ref_frame.seg_f_vec_.col(i * 2));
+        // NAME_VALUE_LOG(ref_frame.seg_f_vec_.col(i * 2 + 1));
+        // NAME_VALUE_LOG(depth_s);
+        // NAME_VALUE_LOG(depth_e);
         }
 
         const Vector3d xyz_ref_s(ref_frame.seg_f_vec_.col(i * 2) * depth_s);     // get the 3d point in
         const Vector3d xyz_ref_e(ref_frame.seg_f_vec_.col(i * 2 + 1) * depth_e); // get the 3d point in
         xyz_ref_cache.col(feature_counter + segment_counter * 2) = xyz_ref_s.cast<FloatType>();
         xyz_ref_cache.col(feature_counter + segment_counter * 2 + 1) = xyz_ref_e.cast<FloatType>();
+        #define NAME_VALUE_LOG(x) std::cout << #x << ": \n" << (x) << std::endl;
+
         const Vector3d xyz_in_imu_s(T_imu_cam * xyz_ref_s);
         const Vector3d xyz_in_imu_e(T_imu_cam * xyz_ref_e);
-
+        // CHECK(!(xyz_ref_s.unaryExpr([](double v) { return std::isinf(v); })).any())
+        //     <<"\n"<<xyz_ref_s.transpose()<<"\n seg_f_vec"<<ref_frame.seg_f_vec_.col(i * 2)<<"\n"<<depth_s<<"\n"<<i*2;
+        // CHECK(!(xyz_ref_e.unaryExpr([](double v) { return std::isinf(v); })).any())
+        //     <<"\n"<<xyz_ref_e.transpose()<<"\n seg_f_vec"<<ref_frame.seg_f_vec_.col(i * 2+1)<<"\n"<<depth_e<<"\n"<<i*2;
         Matrix<double, 2, 6> frame_jac_s;
         Matrix<double, 2, 6> frame_jac_e;
         if (!use_distortion_jac &&
@@ -540,6 +625,21 @@ namespace svo
         jacobian_proj_cache.col(col_index + 1) = frame_jac_s.row(1).cast<FloatType>();
         jacobian_proj_cache.col(col_index + 2) = frame_jac_e.row(0).cast<FloatType>();
         jacobian_proj_cache.col(col_index + 3) = frame_jac_e.row(1).cast<FloatType>();
+
+          
+            // CHECK(!(jacobian_proj_cache.col(col_index).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+            // <<"\n"<<jacobian_proj_cache.col(col_index).transpose()<<"\n pjc"<<col_index<<"\n"<<feature_counter<<" "<<
+            // segment_counter<<"\n"<<xyz_ref_s<<"\n"<<frame_jac_s<<"\n seg_f_vec"<<ref_frame.seg_f_vec_.col(i * 2)<<"\n"<<depth_s<<"\n"<<i*2;
+            // CHECK(!(jacobian_proj_cache.col(col_index+1).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+            // <<"\n"<<jacobian_proj_cache.col(col_index+1).transpose()<<"\n pjc"<<col_index+1<<"\n"<<feature_counter<<
+            // " "<<segment_counter<<"\n"<<xyz_ref_s<<"\n"<<frame_jac_s<<"\n seg_f_vec"<<ref_frame.seg_f_vec_.col(i * 2)<<"\n"<<depth_s<<"\n"<<i*2;         
+            //  CHECK(!(jacobian_proj_cache.col(col_index+2).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+            // <<"\n"<<jacobian_proj_cache.col(col_index+2).transpose()<<"\n pjc"<<col_index+2<<"\n"<<feature_counter<<
+            // " "<<segment_counter<<"\n"<<xyz_ref_e<<"\n"<<frame_jac_e<<"\n seg_f_vec"<<ref_frame.seg_f_vec_.col(i * 2+1)<<"\n"<<depth_e<<"\n"<<i*2+1;         
+            //  CHECK(!(jacobian_proj_cache.col(col_index+3).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+            // <<"\n"<<jacobian_proj_cache.col(col_index+3).transpose()<<"\n pjc"<<col_index+3<<"\n"<<feature_counter<<
+            // " "<<segment_counter<<"\n"<<xyz_ref_e<<"\n"<<frame_jac_e<<"\n seg_f_vec"<<ref_frame.seg_f_vec_.col(i * 2+1)<<"\n"<<depth_e<<"\n"<<i*2+1; 
+
         ++segment_counter;
       }
     }
@@ -652,11 +752,12 @@ namespace svo
 
       // interpolate patch + border (filled in row major format)
       FloatType interp_patch_array[patch_area_wb];
-
+      // std::cout<<"nr_segment"<<nr_segment<<std::endl;
       for (size_t iiii = 0; iiii < nr_segment; ++iiii, ++segment_counter)
       {
         for (size_t line_endpoint_idx = 0; line_endpoint_idx < 2; ++line_endpoint_idx)
         {
+          
           size_t now_index = feature_counter + segment_counter * 2 + line_endpoint_idx;
           // compute top left coordinate of patch to be interpolated
           const FloatType u_tl = uv_cache(0, now_index) * scale - patch_center_wb;
@@ -704,97 +805,103 @@ namespace svo
 
               // cache the jacobian
               int jacobian_col = now_index * patch_area + pixel_counter;
+            //   CHECK(!(jacobian_proj_cache.col(jacobian_proj_col).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+            // <<"\n"<<jacobian_proj_cache.col(jacobian_proj_col).transpose()<<"\n pjc"<<jacobian_proj_col<<"\n jc"<<jacobian_col<<" ";
+            // CHECK(!(jacobian_proj_cache.col(jacobian_proj_col+1).array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+            // <<"\n"<<jacobian_proj_cache.col(jacobian_proj_col).transpose()<<"\n pjc"<<jacobian_proj_col<<"\n jc"<<jacobian_col<<" ";
+
               jacobian_cache.block<6, 1>(0, jacobian_col) =
                   (dx * jacobian_proj_cache.col(jacobian_proj_col) + dy * jacobian_proj_cache.col(jacobian_proj_col + 1)) * scale;
               jacobian_cache(6, jacobian_col) = estimate_alpha ? -(interp_patch_array[offset_center]) : 0.0;
               jacobian_cache(7, jacobian_col) = estimate_beta ? -1.0 : 0.0;
+              // std::cout<<"now comp cols "<<jacobian_col<<std::endl;
             }
           }
         }
       }
     }
 
-    void precomputeJacobiansAndRefPatches_(
-        const FramePtr &ref_frame,
-        const UvCache &uv_cache,
-        const JacobianProjCache &jacobian_proj_cache,
-        const size_t level,
-        const int patch_size,
-        const size_t nr_features,
-        bool estimate_alpha,
-        bool estimate_beta,
-        size_t &feature_counter,
-        JacobianCache &jacobian_cache,
-        RefPatchCache &ref_patch_cache)
-    {
-      const cv::Mat &ref_img = ref_frame->img_pyr_.at(level);
-      const int stride = ref_img.step; // must be real stride
-      const FloatType scale = 1.0f / (1 << level);
-      const int patch_area = patch_size * patch_size;
-      const int border = 1;
-      const int patch_size_wb = patch_size + 2 * border; // patch size with border
-      const int patch_area_wb = patch_size_wb * patch_size_wb;
-      const FloatType patch_center_wb = (patch_size_wb - 1) / 2.0f;
+    // void precomputeJacobiansAndRefPatches_(
+    //     const FramePtr &ref_frame,
+    //     const UvCache &uv_cache,
+    //     const JacobianProjCache &jacobian_proj_cache,
+    //     const size_t level,
+    //     const int patch_size,
+    //     const size_t nr_features,
+    //     bool estimate_alpha,
+    //     bool estimate_beta,
+    //     size_t &feature_counter,
+    //     JacobianCache &jacobian_cache,
+    //     RefPatchCache &ref_patch_cache)
+    // {
+    //   const cv::Mat &ref_img = ref_frame->img_pyr_.at(level);
+    //   const int stride = ref_img.step; // must be real stride
+    //   const FloatType scale = 1.0f / (1 << level);
+    //   const int patch_area = patch_size * patch_size;
+    //   const int border = 1;
+    //   const int patch_size_wb = patch_size + 2 * border; // patch size with border
+    //   const int patch_area_wb = patch_size_wb * patch_size_wb;
+    //   const FloatType patch_center_wb = (patch_size_wb - 1) / 2.0f;
 
-      // interpolate patch + border (filled in row major format)
-      FloatType interp_patch_array[patch_area_wb];
+    //   // interpolate patch + border (filled in row major format)
+    //   FloatType interp_patch_array[patch_area_wb];
 
-      for (size_t i = 0; i < nr_features; ++i, ++feature_counter)
-      {
-        // compute top left coordinate of patch to be interpolated
-        const FloatType u_tl = uv_cache(0, feature_counter) * scale - patch_center_wb;
-        const FloatType v_tl = uv_cache(1, feature_counter) * scale - patch_center_wb;
+    //   for (size_t i = 0; i < nr_features; ++i, ++feature_counter)
+    //   {
+    //     // compute top left coordinate of patch to be interpolated
+    //     const FloatType u_tl = uv_cache(0, feature_counter) * scale - patch_center_wb;
+    //     const FloatType v_tl = uv_cache(1, feature_counter) * scale - patch_center_wb;
 
-        const int u_tl_i = std::floor(u_tl);
-        const int v_tl_i = std::floor(v_tl);
+    //     const int u_tl_i = std::floor(u_tl);
+    //     const int v_tl_i = std::floor(v_tl);
 
-        // compute bilateral interpolation weights for reference image
-        const FloatType subpix_u_tl = u_tl - u_tl_i;
-        const FloatType subpix_v_tl = v_tl - v_tl_i;
-        const FloatType wtl = (1.0 - subpix_u_tl) * (1.0 - subpix_v_tl);
-        const FloatType wtr = subpix_u_tl * (1.0 - subpix_v_tl);
-        const FloatType wbl = (1.0 - subpix_u_tl) * subpix_v_tl;
-        const FloatType wbr = subpix_u_tl * subpix_v_tl;
-        const int jacobian_proj_col = 2 * feature_counter;
+    //     // compute bilateral interpolation weights for reference image
+    //     const FloatType subpix_u_tl = u_tl - u_tl_i;
+    //     const FloatType subpix_v_tl = v_tl - v_tl_i;
+    //     const FloatType wtl = (1.0 - subpix_u_tl) * (1.0 - subpix_v_tl);
+    //     const FloatType wtr = subpix_u_tl * (1.0 - subpix_v_tl);
+    //     const FloatType wbl = (1.0 - subpix_u_tl) * subpix_v_tl;
+    //     const FloatType wbr = subpix_u_tl * subpix_v_tl;
+    //     const int jacobian_proj_col = 2 * feature_counter;
 
-        // interpolate patch with border
-        size_t pixel_counter = 0;
-        for (int y = 0; y < patch_size_wb; ++y)
-        {
-          // reference image pointer (openCv stores data in row major format)
-          uint8_t *r =
-              static_cast<uint8_t *>(ref_img.data) + (v_tl_i + y) * stride + u_tl_i;
-          for (int x = 0; x < patch_size_wb; ++x, ++r, ++pixel_counter)
-          {
-            // precompute interpolated reference patch color
-            interp_patch_array[pixel_counter] = wtl * r[0] + wtr * r[1] + wbl * r[stride] + wbr * r[stride + 1];
-          }
-        }
+    //     // interpolate patch with border
+    //     size_t pixel_counter = 0;
+    //     for (int y = 0; y < patch_size_wb; ++y)
+    //     {
+    //       // reference image pointer (openCv stores data in row major format)
+    //       uint8_t *r =
+    //           static_cast<uint8_t *>(ref_img.data) + (v_tl_i + y) * stride + u_tl_i;
+    //       for (int x = 0; x < patch_size_wb; ++x, ++r, ++pixel_counter)
+    //       {
+    //         // precompute interpolated reference patch color
+    //         interp_patch_array[pixel_counter] = wtl * r[0] + wtr * r[1] + wbl * r[stride] + wbr * r[stride + 1];
+    //       }
+    //     }
 
-        // fill ref_patch_cache and jacobian_cache
-        pixel_counter = 0;
-        for (int y = 0; y < patch_size; ++y)
-        {
-          for (int x = 0; x < patch_size; ++x, ++pixel_counter)
-          {
-            int offset_center = (x + border) + patch_size_wb * (y + border);
-            ref_patch_cache(pixel_counter, feature_counter) = interp_patch_array[offset_center];
+    //     // fill ref_patch_cache and jacobian_cache
+    //     pixel_counter = 0;
+    //     for (int y = 0; y < patch_size; ++y)
+    //     {
+    //       for (int x = 0; x < patch_size; ++x, ++pixel_counter)
+    //       {
+    //         int offset_center = (x + border) + patch_size_wb * (y + border);
+    //         ref_patch_cache(pixel_counter, feature_counter) = interp_patch_array[offset_center];
 
-            // we use the inverse compositional: thereby we can take the gradient
-            // always at the same position.
-            const FloatType dx = 0.5f * (interp_patch_array[offset_center + 1] - interp_patch_array[offset_center - 1]);
-            const FloatType dy = 0.5f * (interp_patch_array[offset_center + patch_size_wb] - interp_patch_array[offset_center - patch_size_wb]);
+    //         // we use the inverse compositional: thereby we can take the gradient
+    //         // always at the same position.
+    //         const FloatType dx = 0.5f * (interp_patch_array[offset_center + 1] - interp_patch_array[offset_center - 1]);
+    //         const FloatType dy = 0.5f * (interp_patch_array[offset_center + patch_size_wb] - interp_patch_array[offset_center - patch_size_wb]);
 
-            // cache the jacobian
-            int jacobian_col = feature_counter * patch_area + pixel_counter;
-            jacobian_cache.block<6, 1>(0, jacobian_col) =
-                (dx * jacobian_proj_cache.col(jacobian_proj_col) + dy * jacobian_proj_cache.col(jacobian_proj_col + 1)) * scale;
-            jacobian_cache(6, jacobian_col) = estimate_alpha ? -(interp_patch_array[offset_center]) : 0.0;
-            jacobian_cache(7, jacobian_col) = estimate_beta ? -1.0 : 0.0;
-          }
-        }
-      }
-    }
+    //         // cache the jacobian
+    //         int jacobian_col = feature_counter * patch_area + pixel_counter;
+    //         jacobian_cache.block<6, 1>(0, jacobian_col) =
+    //             (dx * jacobian_proj_cache.col(jacobian_proj_col) + dy * jacobian_proj_cache.col(jacobian_proj_col + 1)) * scale;
+    //         jacobian_cache(6, jacobian_col) = estimate_alpha ? -(interp_patch_array[offset_center]) : 0.0;
+    //         jacobian_cache(7, jacobian_col) = estimate_beta ? -1.0 : 0.0;
+    //       }
+    //     }
+    //   }
+    // }
 
     void computeResidualsOfFrame(
         const FramePtr &cur_frame,
@@ -900,6 +1007,14 @@ namespace svo
         ResidualCache &residual_cache,
         VisibilityMask &visibility_mask)
     {
+      // NAME_VALUE_LOG(ref_patch_cache);
+      // NAME_VALUE_LOG(xyz_ref_cache);
+      // NAME_VALUE_LOG(ref_patch_cache.cols());
+      // NAME_VALUE_LOG(xyz_ref_cache.cols());
+      // NAME_VALUE_LOG(residual_cache.cols());
+      // NAME_VALUE_LOG(visibility_mask.cols());
+
+      // NAME_VALUE_LOG(feature_counter);
       const cv::Mat &cur_img = cur_frame->img_pyr_.at(level);
       const int stride = cur_img.step;
       const FloatType scale = 1.0f / (1 << level);
@@ -912,7 +1027,8 @@ namespace svo
       {
         for (size_t idx = 0; idx < 2; ++idx)
         {
-          size_t now_idx=feature_counter+segment_counter*2;
+          size_t now_idx=feature_counter+segment_counter*2+idx;
+          // NAME_VALUE_LOG(now_idx);
           Vector3ft xyz_ref = xyz_ref_cache.col(now_idx);
           const Vector3d xyz_cur(T_cur_ref * xyz_ref.cast<double>());
           if (cur_frame->cam()->getType() ==
@@ -966,6 +1082,9 @@ namespace svo
               FloatType intensity_cur =
                   wtl * cur_img_ptr[0] + wtr * cur_img_ptr[1] + wbl * cur_img_ptr[stride] + wbr * cur_img_ptr[stride + 1];
               FloatType res = static_cast<FloatType>(intensity_cur * (1.0 + alpha) + beta) - ref_patch_cache(pixel_counter, now_idx);
+              // CHECK(static_cast<FloatType>(intensity_cur * (1.0 + alpha) + beta)<256);
+              // CHECK(ref_patch_cache(pixel_counter, now_idx)<256);
+              // CHECK(res<256);
               residual_cache(pixel_counter, now_idx) = res;
 
               // for camera control:
@@ -975,6 +1094,8 @@ namespace svo
           }
         }
       }
+      // NAME_VALUE_LOG(segment_counter);
+
     }
 
     FloatType computeHessianAndGradient(
@@ -995,11 +1116,14 @@ namespace svo
       {
         if (visibility_mask(i) == true)
         {
+
           size_t patch_offset = i * patch_area;
+          
+           
           for (size_t j = 0; j < patch_area; ++j)
           {
             FloatType res = residual_cache(j, i);
-
+            // std::cout<<res<<" "<<std::endl;
             // Robustification.
             float weight = 1.0;
             if (weight_function)
@@ -1011,9 +1135,15 @@ namespace svo
             // Compute Jacobian, weighted Hessian and weighted "steepest descend images" (times error).
             const Vector8ft J_ft = jacobian_cache.col(patch_offset + j);
             const Vector8d J_d = J_ft.cast<double>();
+            Eigen::VectorXd J_d_copy = J_d;
+            // CHECK(!(J_d_copy.array().unaryExpr([](double v) { return std::isinf(v); })).any())
+            // <<"\n"<<J_d_copy.transpose()<<"\n"<<i<<" "<<j<<" "<< patch_offset + j<<" "<<jacobian_cache.cols();
+
+            // CHECK(res<500)<<res<<" "<<i<<" "<<j;
             H->noalias() += J_d * J_d.transpose() * weight;
             g->noalias() -= J_d * res * weight;
           }
+          // std::cout<<i<<"cols \n"<<std::endl;
         }
       }
 

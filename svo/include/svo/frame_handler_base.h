@@ -23,7 +23,7 @@
 #include "svo/common/frame.h"
 #include "svo/map.h"
 #include "svo/global.h"
-
+#define SEGMENT_ENABLE
 // forward declarations:
 namespace vk
 {
@@ -464,8 +464,10 @@ protected:
   size_t sparseImageAlignment();
 
   size_t projectMapInFrame();
-size_t projectMapInFrameAddSegment();
 
+#ifdef SEGMENT_ENABLE
+size_t projectMapInFrameAddSegment();
+#endif
   size_t optimizePose();
 
   void optimizeStructure(
@@ -474,7 +476,7 @@ size_t projectMapInFrameAddSegment();
       int max_iter);
 
   void upgradeSeedsToFeatures(const FramePtr& frame);
-
+void upgradeSegmentSeedsToFeatures(const FramePtr& frame);
   /// Reset the map and frame handler to start from scratch.
   void resetVisionFrontendCommon();
 
@@ -503,7 +505,8 @@ size_t projectMapInFrameAddSegment();
   virtual void setDetectorOccupiedCells(
       const size_t reprojector_grid_idx,
       const DetectorPtr& feature_detector);
-
+  virtual void setSegmentDetectorOccupiedCells(
+    const size_t reprojector_grid_idx, const SegmentDetectorConstPtr& segment_detector);
   /// Get motion prior, between last and new frames expressed in IMU frame.
   virtual void getMotionPrior(const bool use_velocity_in_frame);
 

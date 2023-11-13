@@ -123,7 +123,7 @@ namespace svo
 
     size_t best_n_segment = 100;
     /// Maximum one feature per bucked with cell_size width and height
-    size_t cell_size = 30;
+    size_t cell_size = 16;
 
     /// Extract features on pyramid
     int max_level = 2;

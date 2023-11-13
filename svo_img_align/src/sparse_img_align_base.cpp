@@ -66,9 +66,20 @@ void SparseImgAlignBase::update(
     const UpdateVector& dx,
     SparseImgAlignState& state_new)
 {
+  // CHECK_GT(state_new.T_icur_iref.getRotation().toImplementation().squaredNorm(),0.999);
+  // CHECK_GT(1.001,state_new.T_icur_iref.getRotation().toImplementation().squaredNorm());
+  // CHECK_GT(1.001,state_old.T_icur_iref.getRotation().toImplementation().squaredNorm());
+  // CHECK_GT(state_old.T_icur_iref.getRotation().toImplementation().squaredNorm(),0.999);
+  // CHECK_GT(1.001,Transformation::exp(-dx.head<6>()).getRotation().toImplementation().squaredNorm());
+  // CHECK_GT(Transformation::exp(-dx.head<6>()).getRotation().toImplementation().squaredNorm(),0.999);
+  // std::cout << "dx: " << dx.head<6>().transpose() << std::endl;
+  // std::cout << "exp(-dx): " << Transformation::exp(-dx.head<6>()).getRotation().toImplementation().coeffs().transpose() << std::endl;
+  // std::cout << "state_old rotation: " << state_old.T_icur_iref.getRotation().toImplementation().coeffs().transpose() << std::endl;
+  
   state_new.T_icur_iref =  state_old.T_icur_iref * Transformation::exp(-dx.head<6>());
   state_new.alpha = (state_old.alpha - dx(6))/(1.0+dx(6));
   state_new.beta  = (state_old.beta  - dx(7))/(1.0+dx(6));
+  // std::cout << "state_new rotation: " << state_new.T_icur_iref.getRotation().toImplementation().coeffs().transpose() << std::endl;
 
   // we need to normalize from time to time otherwise rounding errors sum up
   state_new.T_icur_iref.getRotation().toImplementation().normalize();

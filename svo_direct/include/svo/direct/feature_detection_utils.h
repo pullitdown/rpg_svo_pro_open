@@ -14,7 +14,9 @@
 #include <svo/common/camera_fwd.h>
 #include <svo/common/occupancy_grid_2d.h>
 #include <svo/direct/feature_detection_types.h>
+#ifdef CUDAFAST_ENABLE
 #include <opencv2/cudafeatures2d.hpp>
+#endif
 #include <svo/direct/ELSED.h>
 namespace svo {
 
@@ -62,6 +64,7 @@ void shiTomasiDetector(
     OccupandyGrid2D& grid,
     OccupandyGrid2D& closeness_check_grid);
 
+#ifdef CUDAFAST_ENABLE
 void cudaFastDetector(
     const ImgPyr& img_pyr,
     const int threshold,
@@ -72,7 +75,7 @@ void cudaFastDetector(
     OccupandyGrid2D& grid,
     cv::Ptr<cv::cuda::FastFeatureDetector> detector_ptr
     );
-
+#endif
 
 void edgeletDetector_V1(
     const ImgPyr& img_pyr,

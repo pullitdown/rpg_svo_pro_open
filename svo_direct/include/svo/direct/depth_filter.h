@@ -15,7 +15,7 @@
 #include <condition_variable>
 #include <vikit/performance_monitor.h>
 #include <svo/direct/matcher.h>
-
+#define SEGMENT_ENABLE
 namespace svo {
 
 // forward declarations
@@ -229,7 +229,7 @@ bool updateSeed(
     const bool check_convergence = false,
     const bool use_vogiatzis_update = true);
 
-
+#ifdef SEGMENT_ENABLE
       void initializeSegmentSeeds(
           const FramePtr &frame,
           const SegmentDetectorPtr &seg_feature_detector,
@@ -238,15 +238,21 @@ bool updateSeed(
           const float depth_max,
           const float depth_mean);
 
+
       bool updateSegmentSeed(
           const Frame &cur_frame,
           Frame &ref_frame,
           const size_t &seed_index,
           Matcher &matcher,
           const FloatType sigma2_convergence_threshold,
-          const bool check_visibility= true,
+          Eigen::Ref<BearingVector> s_f_cur,
+         Eigen::Ref<BearingVector> e_f_cur,
+         Eigen::Ref<Segment> seg_cur,
+    const bool check_visibility = true,
     const bool check_convergence = false,
     const bool use_vogiatzis_update = true);
+#endif
+
 bool updateFilterVogiatzis(
     const FloatType z,
     const FloatType tau2,

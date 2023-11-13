@@ -195,6 +195,8 @@ namespace svo
   }
 
   //-----------------------------------------------------------------------------
+
+  #ifdef CUDAFAST_ENABLE
   void CudaFastGradDetector::detect(
       const ImgPyr &img_pyr,
       const cv::Mat &mask,
@@ -235,7 +237,7 @@ namespace svo
 
     resetGrid();
   }
-
+#endif
   //------------------------------------------------------------------------------
   void ShiTomasiGradDetector::detect(
       const ImgPyr &img_pyr,
@@ -554,6 +556,7 @@ void AllPixelsDetector::detect(
       ScoreSegments segs(
           grid_.n_cols * grid_.n_rows,
           ScoreSegment(0, 0, 0, 0, options_.segment_socre_threshold,0,-1));
+      // std::cout<<"segs.size()"<<segs.size()<<std::endl;
 
       fd_utils::ElSEDdetect(img_pyr,
           options_.border,

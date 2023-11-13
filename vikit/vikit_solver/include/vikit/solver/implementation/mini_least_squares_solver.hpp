@@ -55,14 +55,16 @@ void MiniLeastSquaresSolver<D, T, Implementation>::optimizeGaussNewton(State& st
 
     // compute initial error
     n_meas_ = 0;
-    double new_chi2 = evaluateError(state, &H_, &g_);
+    double new_chi2 = evaluateError(state, &H_, &g_);// the error enter
 
     // add prior
     if(have_prior_)
     {
       applyPrior(state);
     }
-
+    // std::cout<<"after evaluateError H_"<< H_.transpose()<<"\n";
+    // std::cout<<"after evaluateError g_"<< g_.transpose()<<"\n";
+    // std::cout<<"after solve dx_"<< dx_.transpose()<<"\n";
     // solve the linear system
     if(!solve(H_, g_, dx_))
     {
@@ -71,6 +73,8 @@ void MiniLeastSquaresSolver<D, T, Implementation>::optimizeGaussNewton(State& st
       stop_ = true;
     }
 
+
+    // std::cout<<"after solve dx_"<< dx_.transpose()<<"\n";
     // check if error increased since last optimization
     if((iter_ > 0 && new_chi2 > chi2_ && solver_options_.stop_when_error_increases) || stop_)
     {
@@ -85,7 +89,7 @@ void MiniLeastSquaresSolver<D, T, Implementation>::optimizeGaussNewton(State& st
 
     // update the model
     State new_state;
-    update(state, dx_, new_state);
+    update(state, dx_, new_state);//in this step dx_ value is not vaild
     old_state = state;
     state = new_state;
     chi2_ = new_chi2;

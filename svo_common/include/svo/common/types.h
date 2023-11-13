@@ -167,7 +167,8 @@ inline bool isUnconvergedSeed(const FeatureType& t)
 {
   return (t == FeatureType::kCornerSeed
           || t == FeatureType::kMapPointSeed
-          || t == FeatureType::kEdgeletSeed);
+          || t == FeatureType::kEdgeletSeed
+          || t== FeatureType::kSegmentSeed);
 }
 
 inline bool isFixedLandmark(const FeatureType& t)
@@ -182,7 +183,7 @@ inline bool isFixedSegmentLandmark(const FeatureType& t)
 
 inline bool isSegment(const FeatureType& t)
 {
-  return t== FeatureType::kSegment|| t==FeatureType::kSegmentSeed || t==FeatureType::kSegmentSeedConverged || t==FeatureType::kFixedSegmentLandmark;
+  return t== FeatureType::kSegment|| t==FeatureType::kSegmentSeed || t==FeatureType::kSegmentSeedConverged ;
 }
 
 inline std::string str(const FeatureType& type)

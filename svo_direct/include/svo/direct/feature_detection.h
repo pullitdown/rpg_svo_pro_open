@@ -12,7 +12,10 @@
 #include <svo/common/camera_fwd.h>
 #include <svo/common/occupancy_grid_2d.h>
 #include <svo/direct/feature_detection_types.h>
+
+#ifdef CUDAFAST_ENABLE
 #include <opencv2/cudafeatures2d.hpp>
+#endif
 #include "svo/direct/ELSED.h"
 namespace svo {
 
@@ -161,6 +164,8 @@ public:
 //       FeatureTypes& types_vec) override;
 // };
 
+
+#ifdef CUDAFAST_ENABLE
 //------------------------------------------------------------------------------
 /// @brief the cuda fast detector with gradient detector
 class CudaFastGradDetector : public AbstractDetector
@@ -185,7 +190,7 @@ public:
       Gradients& grad_vec,
       FeatureTypes& types_vec) override;
 };
-
+#endif
 //------------------------------------------------------------------------------
 /// shitomasi detector with gradient detector
 class ShiTomasiGradDetector : public AbstractDetector
