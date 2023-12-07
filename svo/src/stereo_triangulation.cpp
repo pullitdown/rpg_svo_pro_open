@@ -546,14 +546,22 @@ void bresenhamLine(const Segments &line, std::vector<Eigen::Vector2i> &linePoint
     FloatType depth_e = 0.0;
     Segment segment_cur;
 
+
     // SegmentWrapper ref_ftr_s;
     std::vector<Matcher::MatchResult> res_s;
+    for (const size_t &i_ref :seg_indices)
     for (const size_t &i_ref :seg_indices)
     {
       // matcher.options_.align_1d = isEdgelet(frame0->type_vec_[i_ref]); // TODO(cfo): check effect
       depth_s = 0.0;
       depth_e = 0.0;
       SegmentWrapper ref_ftr_s = frame0->getSegmentWrapper(i_ref);
+      // NAME_VALUE_LOG(ref_ftr_s.s_f);
+      // NAME_VALUE_LOG(ref_ftr_s.segment);
+      // NAME_VALUE_LOG(ref_ftr_s.e_f);
+
+      BearingVector s_f_cur;
+      BearingVector e_f_cur;
       // NAME_VALUE_LOG(ref_ftr_s.s_f);
       // NAME_VALUE_LOG(ref_ftr_s.segment);
       // NAME_VALUE_LOG(ref_ftr_s.e_f);

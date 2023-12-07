@@ -123,6 +123,7 @@ public:
     size_t ref_index;     //!< Feature index in reference frame.
     Keypoint cur_px;      //!< Projected 2D pixel location in current frame.
     Keypoint cur_px_end;  //!< segment candidate  would set cur_px_end, but feature candidate would not set 
+    Keypoint cur_px_end;  //!< segment candidate  would set cur_px_end, but feature candidate would not set 
     int n_reproj = 0;     //!< Number of previously successful projections for quality.
     Score score;          //!< Feature Detection Score
     FeatureType type;     //!< Type of feature to determine quality.
@@ -174,8 +175,13 @@ public:
 
 #ifdef SEGMENT_ENABLE
   void reprojectFramesSegment(// just for segment projection
+
+#ifdef SEGMENT_ENABLE
+  void reprojectFramesSegment(// just for segment projection
     const FramePtr& cur_frame,
     const std::vector<FramePtr>& visible_kfs,
+    std::vector<LinePtr>& trash_segments);
+#endif
     std::vector<LinePtr>& trash_segments);
 #endif
 private:
@@ -238,6 +244,12 @@ bool matchSegmentCandidate(
       const FramePtr& ref_frame,
       const size_t& ref_index,
       Reprojector::Candidate& candidate);
+bool getCandidateSegment(
+    const FramePtr& cur_frame,
+    const FramePtr& ref_frame,
+    const size_t& seg_ref_index,
+    Reprojector::Candidate& candidate
+    );
 bool getCandidateSegment(
     const FramePtr& cur_frame,
     const FramePtr& ref_frame,

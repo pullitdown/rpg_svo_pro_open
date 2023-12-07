@@ -106,7 +106,10 @@ UpdateResult FrameHandlerStereo::processFrame()
   n_tracked_features = projectMapInFrame();
 
 #ifdef SEGMENT_ENABLE
+#ifdef SEGMENT_ENABLE
   // STEP 2.5: Map Reprojection & Segment 
+  size_t n_tracked_segments = projectMapInFrameAddSegment();// in this line it cause the history line project to current frame ,but not clearly code the information
+#endif
   size_t n_tracked_segments = projectMapInFrameAddSegment();// in this line it cause the history line project to current frame ,but not clearly code the information
 #endif
 
@@ -166,10 +169,12 @@ UpdateResult FrameHandlerStereo::makeKeyframe()
   {
     setDetectorOccupiedCells(0, stereo_triangulation_->feature_detector_);
     setSegmentDetectorOccupiedCells(0, stereo_triangulation_->segment_detector_);
+    setSegmentDetectorOccupiedCells(0, stereo_triangulation_->segment_detector_);
     new_frames_->at(other_id)->setKeyframe();
     map_->addKeyframe(new_frames_->at(other_id),
                       bundle_adjustment_type_==BundleAdjustmentType::kCeres);
     upgradeSeedsToFeatures(new_frames_->at(other_id));
+    upgradeSegmentSeedsToFeatures(new_frames_->at(other_id));
     upgradeSegmentSeedsToFeatures(new_frames_->at(other_id));
     stereo_triangulation_->compute(new_frames_->at(0), new_frames_->at(1));
   }
@@ -181,12 +186,14 @@ UpdateResult FrameHandlerStereo::makeKeyframe()
                     bundle_adjustment_type_==BundleAdjustmentType::kCeres);
   upgradeSeedsToFeatures(new_frames_->at(kf_id));
   upgradeSegmentSeedsToFeatures(new_frames_->at(kf_id));
+  upgradeSegmentSeedsToFeatures(new_frames_->at(kf_id));
 
   // init new depth-filters, set feature-detection grid-cells occupied that
   // already have a feature
   {
     DepthFilter::ulock_t lock(depth_filter_->feature_detector_mut_);
     setDetectorOccupiedCells(kf_id, depth_filter_->feature_detector_);
+    setSegmentDetectorOccupiedCells(kf_id, depth_filter_->segment_detector_);
     setSegmentDetectorOccupiedCells(kf_id, depth_filter_->segment_detector_);
   } // release lock
   depth_filter_->addKeyframe(
@@ -206,19 +213,35 @@ UpdateResult FrameHandlerStereo::makeKeyframe()
   //  }
           // CHECK(!(state_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
           // CHECK(!(state_s.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
+  //  for(size_t i =0;i<new_frames_->at(0)->num_segments_;i++)
+  //  {
+  //     if(isSeed(new_frames_->at(0)->type_vec_[i])&&(
+  //     new_frames_->at(0)->seg_invmu_sigma2_a_b_vec_.col(i*2).array().unaryExpr([](double v){ return std::isinf(v)||std::isnan(v); })).any())
+  //     {
+  //       CHECK(false)<<static_cast<int>(new_frames_->at(0)->type_vec_[i])<<" "<<new_frames_->at(0)->seg_invmu_sigma2_a_b_vec_.col(i*2)<<std::endl;
+  //     }
+  //  }
+          // CHECK(!(state_e.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
+          // CHECK(!(state_s.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any());
   if(options_.update_seeds_with_old_keyframes)
   {
     // std::cout<<"update with old"<<std::endl;
+    // std::cout<<"update with old"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(0) }, last_frames_->at(0));
+    // std::cout<<"n0lo"<<std::endl;
     // std::cout<<"n0lo"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(0) }, last_frames_->at(1));
     // std::cout<<"n0l1"<<std::endl;
+    // std::cout<<"n0l1"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(1) }, last_frames_->at(0));
+    // std::cout<<"n1lo"<<std::endl;
     // std::cout<<"n1lo"<<std::endl;
     depth_filter_->updateSeeds({ new_frames_->at(1) }, last_frames_->at(1));
     // std::cout<<"n1l1"<<std::endl;
+    // std::cout<<"n1l1"<<std::endl;
     for(const FramePtr& old_keyframe : overlap_kfs_.at(0))
     {
+      if(old_keyframe==last_frames_->at(0))continue;
       if(old_keyframe==last_frames_->at(0))continue;
       depth_filter_->updateSeeds({ new_frames_->at(0) }, old_keyframe);
       depth_filter_->updateSeeds({ new_frames_->at(1) }, old_keyframe);

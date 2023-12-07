@@ -466,7 +466,10 @@ protected:
   size_t projectMapInFrame();
 
 #ifdef SEGMENT_ENABLE
+
+#ifdef SEGMENT_ENABLE
 size_t projectMapInFrameAddSegment();
+#endif
 #endif
   size_t optimizePose();
 
@@ -476,6 +479,7 @@ size_t projectMapInFrameAddSegment();
       int max_iter);
 
   void upgradeSeedsToFeatures(const FramePtr& frame);
+void upgradeSegmentSeedsToFeatures(const FramePtr& frame);
 void upgradeSegmentSeedsToFeatures(const FramePtr& frame);
   /// Reset the map and frame handler to start from scratch.
   void resetVisionFrontendCommon();
@@ -505,6 +509,8 @@ void upgradeSegmentSeedsToFeatures(const FramePtr& frame);
   virtual void setDetectorOccupiedCells(
       const size_t reprojector_grid_idx,
       const DetectorPtr& feature_detector);
+  virtual void setSegmentDetectorOccupiedCells(
+    const size_t reprojector_grid_idx, const SegmentDetectorConstPtr& segment_detector);
   virtual void setSegmentDetectorOccupiedCells(
     const size_t reprojector_grid_idx, const SegmentDetectorConstPtr& segment_detector);
   /// Get motion prior, between last and new frames expressed in IMU frame.

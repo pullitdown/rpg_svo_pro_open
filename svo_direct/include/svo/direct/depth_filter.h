@@ -230,6 +230,7 @@ bool updateSeed(
     const bool use_vogiatzis_update = true);
 
 #ifdef SEGMENT_ENABLE
+#ifdef SEGMENT_ENABLE
       void initializeSegmentSeeds(
           const FramePtr &frame,
           const SegmentDetectorPtr &seg_feature_detector,
@@ -237,6 +238,7 @@ bool updateSeed(
           const float depth_min,
           const float depth_max,
           const float depth_mean);
+
 
 
       bool updateSegmentSeed(
@@ -249,8 +251,14 @@ bool updateSeed(
          Eigen::Ref<BearingVector> e_f_cur,
          Eigen::Ref<Segment> seg_cur,
     const bool check_visibility = true,
+          Eigen::Ref<BearingVector> s_f_cur,
+         Eigen::Ref<BearingVector> e_f_cur,
+         Eigen::Ref<Segment> seg_cur,
+    const bool check_visibility = true,
     const bool check_convergence = false,
     const bool use_vogiatzis_update = true);
+#endif
+
 #endif
 
 bool updateFilterVogiatzis(

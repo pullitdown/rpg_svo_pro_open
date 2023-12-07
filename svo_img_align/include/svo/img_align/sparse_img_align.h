@@ -69,6 +69,7 @@ namespace svo
         HessianMatrix *H,
         GradientVector *g);
     double evaluateError_(
+    double evaluateError_(
         const SparseImgAlignState &state,
         HessianMatrix *H,
         GradientVector *g);
@@ -96,6 +97,11 @@ namespace svo
                                const int max_level,     // get the max pyramid
                                const int patch_size_wb, // patch_size + border (usually 2 for gradient),
                                std::vector<size_t> &fts);
+
+    void extractSegmentsSubset(const Frame &ref_frame,  // last frame for data reference
+                               const int max_level,     // get the max pyramid
+                               const int patch_size_wb, // patch_size + border (usually 2 for gradient),
+                               std::vector<size_t> &fts);
     // Fills UvCache (needed for extraction of refpatch extraction at every pyramid level),
     // XyzRefCache (needed at every optimization step for reprojection) and
     // JacobianProjCache (needed at every pyramid level)
@@ -107,6 +113,7 @@ namespace svo
         UvCache &uv_cache,
         XyzRefCache &xyz_ref_cache,
         JacobianProjCache &jacobian_proj_cache);
+
 
 
 
@@ -123,6 +130,8 @@ namespace svo
         JacobianCache &jacobian_cache,
         RefPatchCache &ref_patch_cache);
 
+
+    
 
     
 
@@ -166,6 +175,30 @@ namespace svo
         bool estimate_beta,
         JacobianCache &jacobian_cache,
         RefPatchCache &ref_patch_cache);
+
+#ifdef SEGMENT_ENABLE
+    void precomputeBaseCachesAddSegment(
+        const Frame &ref_frame,
+        const std::vector<size_t> &fts,
+        const bool use_pinhole_distortion,
+        const size_t &feature_counter,
+        size_t &segment_counter,
+        UvCache &uv_cache,
+        XyzRefCache &xyz_ref_cache,
+        JacobianProjCache &jacobian_proj_cache);
+    void precomputeJacobiansAndRefPatchesAddSegment(
+        const FramePtr &ref_frame,
+        const UvCache &uv_cache, // uv chche no the pixel index but the normal index in camera plane
+        const JacobianProjCache &jacobian_proj_cache,
+        const size_t level,
+        const int patch_size,
+        const size_t nr_segment,
+        const size_t &feature_counter, // feature counter is compute the cache
+        size_t &segment_counter,
+        bool estimate_alpha,
+        bool estimate_beta,
+        JacobianCache &jacobian_cache,
+        RefPatchCache &ref_patch_cache);
     void computeResidualsOfFrameAddSegment(
         const FramePtr &cur_frame,
         const size_t level,
@@ -182,6 +215,7 @@ namespace svo
         ResidualCache &residual_cache,
         VisibilityMask &visibility_mask);
     // Compute Hessian and gradient
+#endif
 #endif
     FloatType computeHessianAndGradient(
         const JacobianCache &jacobian_cache,

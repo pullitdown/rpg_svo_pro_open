@@ -28,6 +28,9 @@
 #define LOG_IF_(condition, ...) if (condition) { \
         printf(__VA_ARGS__); \
     }
+#define LOG_IF_(condition, ...) if (condition) { \
+        printf(__VA_ARGS__); \
+    }
 namespace svo {
 
 Matcher::MatchResult Matcher::findMatchDirect(
@@ -149,6 +152,7 @@ Matcher::MatchResult Matcher::findMatchDirectSegmentEndpoint(
     const Eigen::Ref<Keypoint> px_ref,
     const Eigen::Ref<BearingVector> f_ref,
     const Eigen::Ref<GradientVector> grad_ref, 
+    const Eigen::Ref<GradientVector> grad_ref, 
     const int ref_level,
     const FeatureType & type_ref,
     const FloatType& ref_depth,
@@ -225,7 +229,10 @@ std::vector< Matcher::MatchResult> Matcher::findMatchDirectSegment(
     const Frame& ref_frame,
     const Frame& cur_frame,
     SegmentWrapper& ref_ftr,  
+    SegmentWrapper& ref_ftr,  
     const FloatType& ref_depth_s,
+    const FloatType& ref_depth_e,       
+    Eigen::Ref<Keypoint> px_cur_s,  
     const FloatType& ref_depth_e,       
     Eigen::Ref<Keypoint> px_cur_s,  
     Eigen::Ref<Keypoint> px_cur_e,
@@ -233,7 +240,12 @@ std::vector< Matcher::MatchResult> Matcher::findMatchDirectSegment(
     Eigen::Ref<BearingVector> e_f_cur
     )
 { 
+{ 
 
+  //1. what is the block<2,1>(0,0) return?
+  //2. why the return thing could not be compiler?
+  //3. what is the ref and ref& meaning 
+  // ref_ftr.segment.head<2>(0)=Eigen::Vector2d(1.0, 2.0);
   //1. what is the block<2,1>(0,0) return?
   //2. why the return thing could not be compiler?
   //3. what is the ref and ref& meaning 
@@ -242,17 +254,20 @@ std::vector< Matcher::MatchResult> Matcher::findMatchDirectSegment(
      ref_frame,
      cur_frame,
     ref_ftr.segment.block<2,1>(0,0),
+    ref_ftr.segment.block<2,1>(0,0),
     ref_ftr.s_f,
     ref_ftr.grad,
     ref_ftr.level,
     ref_ftr.type,
     ref_depth_s,
      px_cur_s);     
+     px_cur_s);     
   s_f_cur=f_cur_;
      
   Matcher::MatchResult res_e= Matcher::findMatchDirectSegmentEndpoint(
      ref_frame,
      cur_frame,
+    ref_ftr.segment.block<2,1>(2,0),
     ref_ftr.segment.block<2,1>(2,0),
     ref_ftr.e_f,
     ref_ftr.grad,
@@ -261,6 +276,7 @@ std::vector< Matcher::MatchResult> Matcher::findMatchDirectSegment(
     ref_depth_e,
      px_cur_e);
   e_f_cur=f_cur_;
+    
     
     return {res_s,res_e};
 }
@@ -306,6 +322,7 @@ Matcher::MatchResult Matcher::findEpipolarMatchDirectSegmentEndpoint(
     reference_bearing_endpoint = ref_ftr.e_f;
     reference_px_endpoint = ref_px_end;
   }
+
 
   // Compute start and end of epipolar line in old_kf for match search, on image plane
   A = T_cur_ref.getRotation().rotate(reference_bearing_endpoint) + T_cur_ref.getPosition() * d_min_inv; // little trick
@@ -725,6 +742,21 @@ void Matcher::scanEpipolarUnitSphere(
   size_t n_steps = epi_length_pyramid_ / 0.7; // TODO(zzc): better way of doing this?
   n_steps = n_steps>options_.max_epi_search_steps? options_.max_epi_search_steps:n_steps;
   size_t half_steps = n_steps / 2;
+if((A.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;
+}
+
+if((B.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;
+}
+
+if((C.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
+{
+  CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;
+}
+  // calculate the step in angle 
 if((A.array().unaryExpr([](double v) { return std::isinf(v)||std::isnan(v); })).any())
 {
   CHECK(false)<<"A"<<A<<"b"<<B<<"c"<<C;

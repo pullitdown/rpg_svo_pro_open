@@ -21,7 +21,9 @@
 #include <svo/direct/feature_detection_types.h>
 #include <svo/direct/feature_detection.h>
 #ifdef CUDAFAST_ENABLE
+#ifdef CUDAFAST_ENABLE
 #include <opencv2/cudafeatures2d.hpp>
+#endif
 #endif
 namespace svo
 {
@@ -67,9 +69,11 @@ namespace svo
         detector.reset(new SobelDetector(options, cam));
         break;
 #ifdef CUDAFAST_ENABLE
+#ifdef CUDAFAST_ENABLE
       case DetectorType::kCudaFastGrad: // BUG need fix memory lack bug
         detector.reset(new CudaFastGradDetector(options, cam));
         break;
+#endif
 #endif
       default:
         SVO_ERROR_STREAM("Detector unknown!");
@@ -222,6 +226,8 @@ namespace svo
 
 
 #ifdef CUDAFAST_ENABLE
+
+#ifdef CUDAFAST_ENABLE
     //------------------------------------------------------------------------------
     void cudaFastDetector(
         const ImgPyr &img_pyr,
@@ -279,6 +285,7 @@ namespace svo
         }
       }
     }
+#endif
 #endif
     //------------------------------------------------------------------------------
     void shiTomasiDetector(
@@ -906,8 +913,19 @@ namespace svo
           // const auto &g = frame.grad_vec_.col(i);
           case FeatureType::kSegment:
                       cv::line(*img_rgb, cv::Point2f(seg(0) , seg(1)),
+                      cv::line(*img_rgb, cv::Point2f(seg(0) , seg(1)),
                      cv::Point2f(seg(2), seg(3)),
                      cv::Scalar(0, 0, 255), 2);                     
+            break;
+          case FeatureType::kSegmentSeed:
+                      cv::line(*img_rgb, cv::Point2f(seg(0) , seg(1)),
+                     cv::Point2f(seg(2), seg(3)),
+                     cv::Scalar(255, 0, 0), 2);
+              break;
+          case FeatureType::kSegmentSeedConverged:
+            cv::line(*img_rgb, cv::Point2f(seg(0) , seg(1)),
+                     cv::Point2f(seg(2), seg(3)),
+                     cv::Scalar(0, 200, 65), 2);
             break;
           case FeatureType::kSegmentSeed:
                       cv::line(*img_rgb, cv::Point2f(seg(0) , seg(1)),
@@ -1339,6 +1357,7 @@ namespace svo
           keyseg_vec.emplace_back(svo::Segment(score_segment.x0, score_segment.y0,score_segment.x1,score_segment.y1));
           level_vec.emplace_back(score_segment.level_);
           score_vec.emplace_back(score_segment.score_);
+          grad_vec.emplace_back(svo::GradientVector(score_segment.y0-score_segment.y1,score_segment.x1-score_segment.x0).normalized());
           grad_vec.emplace_back(svo::GradientVector(score_segment.y0-score_segment.y1,score_segment.x1-score_segment.x0).normalized());
           grid.occupancy_[grid.getCellIndex(score_segment.x0, score_segment.y0)] = true; // in this step just for anther feature detector don't detect feature in same cell
           grid.occupancy_[grid.getCellIndex(score_segment.x1, score_segment.y1)] = true; // in this step just for anther feature detector don't detect feature in same cell
